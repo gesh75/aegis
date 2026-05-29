@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>AEGIS — Product Overview</title>
+<style>
+  :root{
+    --bg:#0b0f17; --panel:#121826; --line:#222d44; --ink:#eaf1fb; --mut:#8a99b0;
+    --acc:#3da9fc; --ok:#2ecc71; --warn:#f5a623; --bad:#ff5c5c; --vio:#b07ee6;
+    --mono:ui-monospace,'SF Mono',Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#06090f;font-family:var(--sans);display:flex;justify-content:center;
+       align-items:center;min-height:100vh;padding:16px}
+  .stage{position:relative;width:100%;max-width:920px;aspect-ratio:16/9;background:var(--bg);
+         border:1px solid var(--line);border-radius:16px;overflow:hidden;
+         box-shadow:0 24px 80px rgba(0,0,0,.6)}
+  .scene{position:absolute;inset:0;padding:48px 56px;opacity:0;transform:translateY(8px);
+         transition:opacity .5s ease,transform .5s ease;display:flex;flex-direction:column;
+         justify-content:center;pointer-events:none}
+  .scene.active{opacity:1;transform:none;pointer-events:auto}
+  .eyebrow{color:var(--acc);font-size:13px;font-weight:700;letter-spacing:2px;
+           text-transform:uppercase;margin-bottom:14px;opacity:0}
+  .scene.active .eyebrow{animation:rise .6s .05s both}
+  h1{color:var(--ink);font-size:46px;line-height:1.05;font-weight:800;letter-spacing:-.5px;opacity:0}
+  .scene.active h1{animation:rise .6s .12s both}
+  h2{color:var(--ink);font-size:30px;line-height:1.15;font-weight:700;opacity:0}
+  .scene.active h2{animation:rise .6s .12s both}
+  .desc{color:var(--mut);font-size:18px;line-height:1.5;max-width:640px;margin-top:16px;opacity:0}
+  .scene.active .desc{animation:rise .6s .24s both}
+  .desc b{color:var(--ink);font-weight:600}
+  .accent{color:var(--acc)} .green{color:var(--ok)} .vio{color:var(--vio)}
+  @keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+  @keyframes pop{from{opacity:0;transform:scale(.9)}to{opacity:1;transform:scale(1)}}
+  @keyframes draw{to{stroke-dashoffset:0}}
+
+  /* title scene boundary */
+  .frame{position:absolute;inset:30px;border:1.5px dashed #2b6cb0;border-radius:14px;opacity:0}
+  .scene.active .frame{animation:pop .8s .1s both}
+  .egress{position:absolute;top:42px;left:50%;transform:translateX(-50%);color:var(--ok);
+          font:12px var(--mono);border:1px solid var(--ok);border-radius:20px;padding:3px 12px;opacity:0}
+  .scene.active .egress{animation:rise .6s .6s both}
+
+  /* pipeline steps */
+  .pipe{display:flex;gap:8px;flex-wrap:wrap;margin-top:26px}
+  .step{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:9px 12px;
+        font-size:13px;color:var(--mut);opacity:0}
+  .step.ai{border-color:var(--acc);color:var(--acc);font-weight:700}
+  .scene.active .step{animation:pop .45s both}
+  .scene.active .step:nth-child(1){animation-delay:.30s}
+  .scene.active .step:nth-child(2){animation-delay:.45s}
+  .scene.active .step:nth-child(3){animation-delay:.60s}
+  .scene.active .step:nth-child(4){animation-delay:.75s}
+  .scene.active .step:nth-child(5){animation-delay:.90s}
+  .scene.active .step:nth-child(6){animation-delay:1.05s}
+  .scene.active .step:nth-child(7){animation-delay:1.20s}
+
+  /* stat */
+  .big{font-size:88px;font-weight:800;color:var(--bad);line-height:1;opacity:0}
+  .scene.active .big{animation:pop .7s .1s both}
+
+  /* compare row */
+  .cmp{display:flex;gap:14px;margin-top:28px}
+  .card{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;opacity:0}
+  .card.win{border-color:var(--acc)}
+  .scene.active .card{animation:rise .5s both}
+  .scene.active .card:nth-child(1){animation-delay:.3s}
+  .scene.active .card:nth-child(2){animation-delay:.45s}
+  .scene.active .card:nth-child(3){animation-delay:.6s}
+  .card .k{font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:1px}
+  .card .v{font-size:15px;color:var(--ink);font-weight:600;margin-top:8px;line-height:1.35}
+
+  /* evidence chips */
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:22px}
+  .chip{font:12px var(--mono);padding:5px 10px;border-radius:7px;border:1px solid var(--line);
+        color:var(--mut);opacity:0}
+  .chip.pass{color:var(--ok);border-color:#1f5d3a;background:#0f1f17}
+  .chip.fail{color:var(--bad);border-color:#5d2222;background:#1f0f0f}
+  .chip.seal{color:var(--green);border-color:#1f5d3a}
+  .scene.active .chip{animation:pop .4s both}
+  .scene.active .chip:nth-child(1){animation-delay:.3s}.scene.active .chip:nth-child(2){animation-delay:.42s}
+  .scene.active .chip:nth-child(3){animation-delay:.54s}.scene.active .chip:nth-child(4){animation-delay:.66s}
+  .scene.active .chip:nth-child(5){animation-delay:.78s}
+
+  /* verdict badge */
+  .verdict{display:inline-flex;align-items:center;gap:12px;margin-top:24px;font-size:30px;
+           font-weight:800;color:var(--ok);opacity:0}
+  .scene.active .verdict{animation:pop .6s .3s both}
+  .verdict .dot{width:18px;height:18px;border-radius:50%;background:var(--ok);
+                box-shadow:0 0 0 0 rgba(46,204,113,.5);animation:pulse 1.8s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(46,204,113,.5)}70%{box-shadow:0 0 0 16px rgba(46,204,113,0)}100%{box-shadow:0 0 0 0 rgba(46,204,113,0)}}
+
+  /* tests grid */
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:24px}
+  .tcell{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;opacity:0}
+  .scene.active .tcell{animation:rise .45s both}
+  .scene.active .tcell:nth-child(1){animation-delay:.25s}.scene.active .tcell:nth-child(2){animation-delay:.35s}
+  .scene.active .tcell:nth-child(3){animation-delay:.45s}.scene.active .tcell:nth-child(4){animation-delay:.55s}
+  .scene.active .tcell:nth-child(5){animation-delay:.65s}.scene.active .tcell:nth-child(6){animation-delay:.75s}
+  .tcell .n{font-size:13px;color:var(--ink);font-weight:600}
+  .tcell .s{font-size:11px;color:var(--mut);margin-top:3px}
+  .tcell .ok{color:var(--ok);font-weight:700;font-size:12px;margin-top:6px}
+
+  /* cta */
+  .url{font:22px var(--mono);color:var(--acc);margin-top:18px;opacity:0}
+  .scene.active .url{animation:rise .6s .3s both}
+
+  /* controls */
+  .ctrl{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:12px;
+        padding:12px 18px;background:linear-gradient(transparent,rgba(0,0,0,.4))}
+  .progress{flex:1;height:4px;background:#1c2536;border-radius:3px;overflow:hidden}
+  .progress .fill{height:100%;width:0;background:var(--acc)}
+  .btn{background:none;border:none;color:var(--ink);cursor:pointer;font-size:16px;opacity:.85}
+  .btn:hover{opacity:1}
+  .dots{display:flex;gap:6px}
+  .dot2{width:7px;height:7px;border-radius:50%;background:#33415c;cursor:pointer}
+  .dot2.on{background:var(--acc)}
+  .brand{position:absolute;top:18px;left:24px;font-size:13px;font-weight:800;color:var(--ink);letter-spacing:.5px;z-index:5}
+  .brand span{color:var(--acc)}
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <div class="brand">AEGIS<span>·</span><span style="color:var(--mut);font-weight:500"> product overview</span></div>
+
+  <!-- 1 title -->
+  <section class="scene" data-d="6000">
+    <div class="frame"></div>
+    <div class="egress">● egress: none</div>
+    <div class="eyebrow">Air-gapped change validation</div>
+    <h1>Prove a network change<br/><span class="accent">before</span> it ships.</h1>
+    <div class="desc">AEGIS validates a proposed change against a <b>real digital twin</b> of your
+      fabric — entirely inside your perimeter — and hands you tamper-evident, audit-grade proof.</div>
+  </section>
+
+  <!-- 2 problem -->
+  <section class="scene" data-d="6500">
+    <div class="eyebrow">The problem</div>
+    <div class="big">#1</div>
+    <h2 style="margin-top:14px">Change is the leading cause of outages.</h2>
+    <div class="desc">Network engineering never had a staging environment. Changes go through a
+      review board and still break production — because <b>production is the only real test
+      environment</b>. The risky misconfigs are the silent ones.</div>
+  </section>
+
+  <!-- 3 gap -->
+  <section class="scene" data-d="7500">
+    <div class="eyebrow">The gap</div>
+    <h2>The new tools are cloud-only.</h2>
+    <div class="cmp">
+      <div class="card"><div class="k">Forward Predict</div><div class="v">Math model · SaaS · data leaves the network</div></div>
+      <div class="card"><div class="k">NetPilot</div><div class="v">Cloud emulation · data leaves the network</div></div>
+      <div class="card win"><div class="k accent">AEGIS</div><div class="v">On-prem · real CLIs · <span class="green">zero egress</span></div></div>
+    </div>
+    <div class="desc">Banks, telcos, federal and healthcare networks <b>legally cannot send</b>
+      topology and config to the cloud — so they're locked out. That's the opening.</div>
+  </section>
+
+  <!-- 4 how -->
+  <section class="scene" data-d="8000">
+    <div class="eyebrow">How it works · guarded-agentic</div>
+    <h2>The LLM proposes. The pipeline <span class="accent">verifies</span>.</h2>
+    <div class="pipe">
+      <div class="step">guard</div>
+      <div class="step ai">generate · LLM</div>
+      <div class="step">batfish</div>
+      <div class="step">twin</div>
+      <div class="step">diff</div>
+      <div class="step">compliance</div>
+      <div class="step">verdict</div>
+    </div>
+    <div class="desc">Only one step touches AI — and the config-import path skips even that.
+      Everything after the proposal is <b>deterministic verification</b>. That's what makes the
+      result auditable instead of “the AI said so.”</div>
+  </section>
+
+  <!-- 5 twin -->
+  <section class="scene" data-d="7000">
+    <div class="eyebrow">Real digital twin</div>
+    <h2>A throwaway fabric that actually <span class="accent">converges</span>.</h2>
+    <div class="desc">AEGIS clones the affected slice into a live <b>containerlab</b> twin — isolated
+      by its own name, network and subnet — applies the change, and watches BGP/EVPN really
+      converge. Not a mathematical model: real vendor control planes, then torn down.</div>
+    <div class="chips">
+      <span class="chip">containerlab</span><span class="chip">SR Linux</span>
+      <span class="chip">Arista cEOS</span><span class="chip">FRR</span>
+      <span class="chip seal">BGP 36 → 36 · converged</span>
+    </div>
+  </section>
+
+  <!-- 6 evidence -->
+  <section class="scene" data-d="8000">
+    <div class="eyebrow">The artifact that gets paid for</div>
+    <h2>A sealed, examiner-ready evidence bundle.</h2>
+    <div class="desc">Every run emits a tamper-evident bundle: the verified twin outcome, the
+      grounded config, a rollback plan, and control results mapped to your frameworks —
+      with a sha256 seal and <b class="green">egress: none</b>.</div>
+    <div class="chips">
+      <span class="chip fail">PCI 8.3.1 · fail</span><span class="chip pass">PCI 1.2.1 · pass</span>
+      <span class="chip pass">SOC2 CC8.1 · pass</span><span class="chip pass">NIST CM-3 · pass</span>
+      <span class="chip seal">sha256 · egress:none</span>
+    </div>
+  </section>
+
+  <!-- 7 gate -->
+  <section class="scene" data-d="7000">
+    <div class="eyebrow">Closed loop · with a human</div>
+    <h2>Validated → <span class="vio">approved</span> → pushed. Never automatic.</h2>
+    <div class="desc">A deterministic approval gate promotes only verified, human-authorized
+      changes. Blocked, tampered, or unapproved changes are denied. AEGIS <b>never mutates
+      production on its own</b> — the push is deliberate, gated, and recorded.</div>
+    <div class="verdict"><span class="dot"></span>SHIP READY</div>
+  </section>
+
+  <!-- 8 proof -->
+  <section class="scene" data-d="7500">
+    <div class="eyebrow">Proof, not promises</div>
+    <h2>6 test suites · <span class="green">0 violations</span>.</h2>
+    <div class="grid">
+      <div class="tcell"><div class="n">Pipeline invariants</div><div class="s">25,000 runs</div><div class="ok">✓ PASS</div></div>
+      <div class="tcell"><div class="n">Promotion gate</div><div class="s">6,000 bundles</div><div class="ok">✓ PASS</div></div>
+      <div class="tcell"><div class="n">Twin safety + isolation</div><div class="s">8,000 ops</div><div class="ok">✓ PASS</div></div>
+      <div class="tcell"><div class="n">Evidence PDF</div><div class="s">1,500 bundles</div><div class="ok">✓ PASS</div></div>
+      <div class="tcell"><div class="n">API contract</div><div class="s">real shapes</div><div class="ok">✓ PASS</div></div>
+      <div class="tcell"><div class="n">Flask endpoints</div><div class="s">10 / 10</div><div class="ok">✓ PASS</div></div>
+    </div>
+  </section>
+
+  <!-- 9 cta -->
+  <section class="scene" data-d="6500">
+    <div class="frame"></div>
+    <div class="eyebrow">Open source · Apache-2.0</div>
+    <h1>Run it offline in <span class="accent">one command</span>.</h1>
+    <div class="desc"><span class="mono" style="font-family:var(--mono);color:var(--ink)">docker compose up</span>
+      → open <span class="accent">localhost:8088/preflight</span>. Real loop, real evidence, zero egress.</div>
+    <div class="url">github.com/gesh75/aegis</div>
+  </section>
+
+  <div class="ctrl">
+    <button class="btn" id="pp">⏸</button>
+    <div class="progress"><div class="fill" id="fill"></div></div>
+    <div class="dots" id="dots"></div>
+    <button class="btn" id="rp">↻</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  const scenes=[...document.querySelectorAll('.scene')];
+  const fill=document.getElementById('fill');
+  const dotsWrap=document.getElementById('dots');
+  const pp=document.getElementById('pp'); const rp=document.getElementById('rp');
+  let i=0, t0=0, raf=0, playing=true, dur=scenes[0].dataset.d|0;
+
+  scenes.forEach((_,k)=>{const d=document.createElement('div');d.className='dot2';
+    d.onclick=()=>go(k);dotsWrap.appendChild(d);});
+  const dots=[...dotsWrap.children];
+
+  function show(k){
+    scenes.forEach((s,j)=>s.classList.toggle('active',j===k));
+    dots.forEach((d,j)=>d.classList.toggle('on',j===k));
+    dur=scenes[k].dataset.d|0; t0=performance.now();
+  }
+  function go(k){i=((k%scenes.length)+scenes.length)%scenes.length;show(i);}
+  function frame(now){
+    if(!playing)return;
+    const p=Math.min(1,(now-t0)/dur);
+    fill.style.width=(p*100).toFixed(1)+'%';
+    if(p>=1){i=(i+1)%scenes.length;show(i);fill.style.width='0%';}
+    raf=requestAnimationFrame(frame);
+  }
+  function play(){playing=true;pp.textContent='⏸';t0=performance.now()- (parseFloat(fill.style.width||0)/100)*dur;cancelAnimationFrame(raf);raf=requestAnimationFrame(frame);}
+  function pause(){playing=false;pp.textContent='▶';cancelAnimationFrame(raf);}
+  pp.onclick=()=>playing?pause():play();
+  rp.onclick=()=>{go(0);play();};
+  // start
+  show(0); t0=performance.now(); raf=requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

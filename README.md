@@ -4,7 +4,7 @@
 > *real* digital twin, entirely inside your perimeter. No cloud. No data egress. Ever.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-6_suites_passing-2ea44f.svg)](STRESS_TEST_RESULTS.md)
+[![tests](https://github.com/gesh75/aegis/actions/workflows/test.yml/badge.svg)](https://github.com/gesh75/aegis/actions/workflows/test.yml)
 [![python](https://img.shields.io/badge/python-3.10%2B-3776ab.svg)](#)
 [![egress](https://img.shields.io/badge/egress-none-2ea44f.svg)](#)
 [![status](https://img.shields.io/badge/status-Phase_2-8a5cf6.svg)](docs/PHASES.md)
