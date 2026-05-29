@@ -1,0 +1,22 @@
+# Air-gapped overlay — proves the zero-egress claim.
+#
+# Build once where you DO have a network, save the image to a file, carry it across the
+# air gap on signed media, load it, then run with NO network at all:
+#
+#   docker compose build                                   # online, once
+#   docker save aegis:local -o aegis-local.tar             # -> signed media
+#   # ...on the air-gapped host...
+#   docker load -i aegis-local.tar
+#   docker compose -f docker-compose.yml -f docker-compose.airgap.yml up
+#
+# `network_mode: none` removes ALL networking from the container after start; the sim-tier
+# server needs no egress, so the UI + pipeline + evidence PDF all work with zero connectivity.
+# (Use a host port-publish reverse proxy, or drop network_mode:none and rely on an internal
+# bridge with no default route, if you need to reach the UI from another host.)
+# With aegis:local already loaded, `docker compose up` (no --build) uses the local image
+# and never rebuilds or pulls; pull_policy:never enforces no registry access.
+services:
+  aegis:
+    image: aegis:local
+    pull_policy: never
+    network_mode: none

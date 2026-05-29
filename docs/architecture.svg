@@ -1,0 +1,106 @@
+<svg viewBox="0 0 960 620" xmlns="http://www.w3.org/2000/svg" role="img" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif">
+<title>AEGIS product architecture</title>
+<desc>An air-gapped change-validation pipeline: an NL intent or pasted config enters a guarded deterministic pipeline (the LLM is used only to propose config; every step after it verifies), runs against a real containerlab digital twin, and emits a sealed, compliance-mapped evidence bundle and PDF. A Phase 2 approval gate promotes only verified, human-approved changes via a dry-run connector.</desc>
+<style>
+  .canvas{fill:#0d1320}
+  .frame{fill:none;stroke:#2b6cb0;stroke-width:1.6;stroke-dasharray:7 5}
+  .lab{fill:#7f8db0;font-size:11px;letter-spacing:.5px}
+  .h1{fill:#eaf1fb;font-size:21px;font-weight:700}
+  .h2{fill:#9fb0cc;font-size:12px}
+  .box{fill:#161d2e;stroke:#26304a;stroke-width:1.2}
+  .t{fill:#dbe6f5;font-size:12.5px;font-weight:600}
+  .ts{fill:#8294b2;font-size:10px}
+  .ai{fill:#10243d;stroke:#3da9fc;stroke-width:1.6}
+  .aitag{fill:#3da9fc;font-size:9.5px;font-weight:700;letter-spacing:.5px}
+  .ev{fill:#0f2018;stroke:#2ecc71;stroke-width:1.5}
+  .gate{fill:#241a30;stroke:#b07ee6;stroke-width:1.5}
+  .arrow{stroke:#4a5b78;stroke-width:1.6;fill:none;marker-end:url(#a)}
+  .flow{stroke:#3da9fc;stroke-width:1.8;fill:none;marker-end:url(#ab)}
+  .lt{fill:#cdd8ea;font-size:11.5px;font-weight:600}
+  .mono{fill:#7fd1a8;font-size:10px;font-family:ui-monospace,Menlo,monospace}
+</style>
+<defs>
+  <marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#5b6b88"/></marker>
+  <marker id="ab" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#3da9fc"/></marker>
+</defs>
+
+<rect class="canvas" x="0" y="0" width="960" height="620" rx="16"/>
+<text class="h1" x="28" y="42">AEGIS</text>
+<text class="h2" x="104" y="42">· air-gapped pre-deployment change validation</text>
+<text class="lab" x="28" y="64">GUARDED-AGENTIC: the LLM only proposes — everything after it is deterministic verification</text>
+
+<rect class="frame" x="22" y="80" width="916" height="372" rx="14"/>
+<text class="lab" x="38" y="100" fill="#5fb0ee">◯ AIR-GAP BOUNDARY · no external DNS · no cloud API · egress = none</text>
+
+<rect class="box" x="40" y="120" width="120" height="46" rx="9"/>
+<text class="t" x="100" y="142" text-anchor="middle">NL intent</text>
+<text class="ts" x="100" y="157" text-anchor="middle">“add VLAN 40…”</text>
+<rect class="box" x="40" y="178" width="120" height="46" rx="9"/>
+<text class="t" x="100" y="200" text-anchor="middle">Paste config</text>
+<text class="ts" x="100" y="215" text-anchor="middle">running-config</text>
+
+<rect class="box" x="196" y="150" width="92" height="60" rx="9"/>
+<text class="t" x="242" y="178" text-anchor="middle">guard</text>
+<text class="ts" x="242" y="194" text-anchor="middle">pre-checks</text>
+
+<rect class="ai" x="308" y="150" width="104" height="60" rx="9"/>
+<text class="aitag" x="360" y="168" text-anchor="middle">LLM · ONLY AI</text>
+<text class="t" x="360" y="186" text-anchor="middle">generate</text>
+<text class="ts" x="360" y="200" text-anchor="middle">Qwen3 + 52k RAG</text>
+
+<rect class="box" x="432" y="150" width="92" height="60" rx="9"/>
+<text class="t" x="478" y="178" text-anchor="middle">batfish</text>
+<text class="ts" x="478" y="194" text-anchor="middle">static check</text>
+
+<rect class="box" x="544" y="150" width="104" height="60" rx="9"/>
+<text class="t" x="596" y="174" text-anchor="middle">twin</text>
+<text class="ts" x="596" y="189" text-anchor="middle">containerlab</text>
+<text class="ts" x="596" y="202" text-anchor="middle">real convergence</text>
+
+<rect class="box" x="668" y="150" width="84" height="60" rx="9"/>
+<text class="t" x="710" y="178" text-anchor="middle">diff</text>
+<text class="ts" x="710" y="194" text-anchor="middle">BGP / routes</text>
+
+<rect class="box" x="772" y="150" width="146" height="60" rx="9"/>
+<text class="t" x="845" y="174" text-anchor="middle">compliance + verdict</text>
+<text class="ts" x="845" y="189" text-anchor="middle">PCI · SOC2 · NIST</text>
+<text class="ts" x="845" y="202" text-anchor="middle">ship / approve / block</text>
+
+<path class="arrow" d="M160 143 H180 V180 H194"/>
+<path class="arrow" d="M160 201 H180 V180"/>
+<path class="flow" d="M288 180 H306"/>
+<path class="flow" d="M412 180 H430"/>
+<path class="arrow" d="M524 180 H542"/>
+<path class="arrow" d="M648 180 H666"/>
+<path class="arrow" d="M752 180 H770"/>
+
+<rect class="box" x="308" y="232" width="340" height="44" rx="9"/>
+<text class="ts" x="478" y="251" text-anchor="middle" fill="#9fb0cc">PLUGGABLE BACKEND (identical pipeline)</text>
+<text class="mono" x="478" y="267" text-anchor="middle">Simulator (CI/sim)  ·  HTTP :5757 (live: Qwen3 + clab twin)</text>
+<path class="arrow" d="M360 232 V214"/>
+<path class="arrow" d="M596 232 V214"/>
+
+<rect class="ev" x="300" y="300" width="356" height="60" rx="9"/>
+<text class="lt" x="478" y="324" text-anchor="middle" fill="#7fe0a6">SEALED EVIDENCE BUNDLE</text>
+<text class="mono" x="478" y="341" text-anchor="middle">sha256 · grounded provenance · egress:none · rollback</text>
+<text class="ts" x="478" y="353" text-anchor="middle">→ examiner-ready PDF (PCI / SOC2 / NIST)</text>
+<path class="flow" d="M845 212 V330 H658"/>
+
+<rect class="gate" x="300" y="378" width="356" height="58" rx="9"/>
+<text class="lt" x="478" y="400" text-anchor="middle" fill="#c9a3ee">APPROVAL GATE · Phase 2</text>
+<text class="ts" x="478" y="416" text-anchor="middle">human approves → dry-run connector (never auto-pushes prod)</text>
+<text class="mono" x="478" y="429" text-anchor="middle">blocked · tampered · unapproved → denied</text>
+<path class="arrow" d="M478 360 V376"/>
+
+<text class="lab" x="38" y="486">VERDICT</text>
+<circle cx="120" cy="482" r="6" fill="#2ecc71"/><text class="ts" x="132" y="486">ship_ready</text>
+<circle cx="232" cy="482" r="6" fill="#f5a623"/><text class="ts" x="244" y="486">needs_approval</text>
+<circle cx="372" cy="482" r="6" fill="#ff5c5c"/><text class="ts" x="384" y="486">blocked</text>
+<text class="lab" x="470" y="486">DESIGN</text>
+<rect x="540" y="476" width="12" height="12" rx="3" class="ai"/><text class="ts" x="558" y="486">AI (propose)</text>
+<rect x="660" y="476" width="12" height="12" rx="3" class="box"/><text class="ts" x="678" y="486">deterministic (verify)</text>
+
+<text class="lab" x="38" y="540">VERIFIED — 6 suites, 0 violations</text>
+<text class="mono" x="38" y="562">pipeline 25k · contract · pdf 1.5k · promote-gate 6k · flask 10/10 · twin+isolation 8k</text>
+<text class="ts" x="38" y="584">vs Forward Predict / NetPilot: same loop, but on-prem · self-hosted LLM · real-CLI twin · audit-grade evidence</text>
+</svg>

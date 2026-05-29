@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>AEGIS · PreFlight</title>
+<style>
+  :root{
+    --bg:#0b0f17; --panel:#121826; --panel2:#0e1422; --line:#1f2a3d;
+    --ink:#e6edf6; --mut:#8a99b0; --acc:#3da9fc; --accd:#1b6fb3;
+    --ok:#2ecc71; --warn:#f5a623; --bad:#ff5c5c; --chip:#1a2436;
+    --mono:'SF Mono',ui-monospace,'Cascadia Code',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;}
+  header{padding:18px 24px;border-bottom:1px solid var(--line);display:flex;
+         align-items:center;gap:14px;background:var(--panel2);}
+  header h1{font-size:18px;margin:0;letter-spacing:.5px}
+  header .tag{font-size:11px;color:var(--mut);border:1px solid var(--line);
+              padding:2px 8px;border-radius:20px}
+  header .egress{margin-left:auto;font-size:11px;color:var(--ok);
+                 border:1px solid var(--ok);padding:2px 10px;border-radius:20px}
+  .wrap{max-width:1180px;margin:0 auto;padding:22px}
+  .bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:18px}
+  input,select,button,textarea{font:inherit}
+  .intent{flex:1;min-width:320px;background:var(--panel);border:1px solid var(--line);
+          color:var(--ink);border-radius:10px;padding:11px 14px;}
+  select{background:var(--panel);border:1px solid var(--line);color:var(--ink);
+         border-radius:10px;padding:11px 12px}
+  button{background:var(--acc);border:none;color:#04121f;font-weight:600;
+         border-radius:10px;padding:11px 20px;cursor:pointer}
+  button:disabled{opacity:.5;cursor:default}
+  .steps{display:flex;gap:6px;margin:8px 0 20px;flex-wrap:wrap}
+  .steps .s{font-size:11px;color:var(--mut);background:var(--chip);
+            border:1px solid var(--line);padding:4px 9px;border-radius:6px}
+  .steps .s.on{color:var(--acc);border-color:var(--accd)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+        padding:16px 18px;min-height:120px}
+  .card h3{margin:0 0 10px;font-size:12px;text-transform:uppercase;
+           letter-spacing:1px;color:var(--mut)}
+  pre{font:12px/1.45 var(--mono);background:var(--panel2);border:1px solid var(--line);
+      border-radius:8px;padding:10px;overflow:auto;white-space:pre-wrap;margin:6px 0}
+  .verdict{font-size:20px;font-weight:700;display:flex;align-items:center;gap:10px}
+  .dot{width:12px;height:12px;border-radius:50%}
+  .ship .dot{background:var(--ok)} .ship{color:var(--ok)}
+  .block .dot{background:var(--bad)} .block{color:var(--bad)}
+  .appr .dot{background:var(--warn)} .appr{color:var(--warn)}
+  .kv{display:flex;justify-content:space-between;border-bottom:1px dashed var(--line);
+      padding:5px 0;font-size:13px}
+  .kv b{font-weight:600}
+  .chip{display:inline-block;font:11px var(--mono);padding:3px 8px;border-radius:6px;
+        margin:3px 4px 0 0;border:1px solid var(--line)}
+  .chip.pass{color:var(--ok);border-color:#1f5d3a;background:#0f1f17}
+  .chip.fail{color:var(--bad);border-color:#5d2222;background:#1f0f0f}
+  .dev{font:12px var(--mono);color:var(--mut);margin-top:4px}
+  .foot{margin-top:18px;font:11px var(--mono);color:var(--mut);
+        border-top:1px solid var(--line);padding-top:10px;word-break:break-all}
+  .muted{color:var(--mut)}
+  .err{color:var(--bad)}
+</style>
+</head>
+<body>
+<header>
+  <h1>AEGIS · <span style="color:var(--acc)">PreFlight</span></h1>
+  <span class="tag">air-gapped change validation</span>
+  <span class="egress">● egress: none</span>
+</header>
+
+<div class="wrap">
+  <div class="bar">
+    <select id="source" onchange="toggleSource()">
+      <option value="nl_intent">intent</option>
+      <option value="config_import">paste config</option>
+    </select>
+    <input id="intent" class="intent"
+           placeholder="Describe a change…  e.g. add VLAN 40 to leaf-2 and peer BGP"
+           value="add VLAN 40 to leaf-2 and peer BGP"/>
+    <select id="vendor" style="display:none">
+      <option value="frr">frr</option>
+      <option value="srlinux">srlinux</option>
+      <option value="ceos">ceos</option>
+      <option value="junos">junos</option>
+      <option value="ios">ios</option>
+      <option value="panos">panos</option>
+    </select>
+    <select id="lab">
+      <option value="clos-evpn">clos-evpn</option>
+      <option value="minimal">minimal</option>
+      <option value="3tier">3tier</option>
+    </select>
+    <select id="mode">
+      <option value="sim">sim</option>
+      <option value="live">live</option>
+    </select>
+    <button id="go" onclick="runPreflight()">Run PreFlight ▸</button>
+  </div>
+  <textarea id="configText" style="display:none;width:100%;min-height:120px;
+    background:var(--panel);border:1px solid var(--line);color:var(--ink);
+    border-radius:10px;padding:11px 14px;font:12px/1.45 var(--mono);margin-bottom:8px"
+    placeholder="Paste a sanitized running-config snippet…  (no LLM touches this path)"></textarea>
+
+  <div class="steps" id="steps">
+    <span class="s" data-k="guard">guard</span>
+    <span class="s" data-k="generate">generate (LLM)</span>
+    <span class="s" data-k="batfish">batfish</span>
+    <span class="s" data-k="twin">twin</span>
+    <span class="s" data-k="diff">diff</span>
+    <span class="s" data-k="compliance">compliance</span>
+    <span class="s" data-k="verdict">verdict</span>
+    <span class="s" data-k="evidence">evidence</span>
+  </div>
+
+  <div class="grid">
+    <div class="card" id="c-verdict"><h3>Verdict</h3><div class="muted">Run a change to begin.</div></div>
+    <div class="card" id="c-twin"><h3>Digital twin</h3><div class="muted">—</div></div>
+    <div class="card" id="c-config"><h3>Generated config (grounded)</h3><div class="muted">—</div></div>
+    <div class="card" id="c-evidence"><h3>Evidence &amp; compliance</h3><div class="muted">—</div></div>
+  </div>
+
+  <div class="foot" id="foot"></div>
+</div>
+
+<script>
+// same-origin whenever served over http(s); only fall back when opened as a file://
+const API = location.protocol.startsWith("http")
+  ? "" : (localStorage.getItem("AEGIS_API") || "http://localhost:5757");
+
+function setSteps(on){document.querySelectorAll('#steps .s').forEach(s=>
+  s.classList.toggle('on', on));}
+
+function toggleSource(){
+  const cfg=document.getElementById('source').value==='config_import';
+  document.getElementById('intent').style.display=cfg?'none':'';
+  document.getElementById('configText').style.display=cfg?'':'none';
+  document.getElementById('vendor').style.display=cfg?'':'none';
+  // config-import skips the LLM, so the "generate (LLM)" step is greyed out
+  const gen=document.querySelector('#steps .s[data-k="generate"]');
+  if(gen) gen.style.opacity=cfg?'0.35':'';
+}
+
+async function runPreflight(){
+  const btn=document.getElementById('go'); btn.disabled=true;
+  setSteps(true);
+  document.getElementById('foot').textContent='running…';
+  const source=document.getElementById('source').value;
+  const body={
+    source:source,
+    lab:document.getElementById('lab').value,
+    mode:document.getElementById('mode').value,
+    frameworks:["pci_dss_v4","soc2","nist_800-53"],
+    approver:"noc-lead"
+  };
+  if(source==='config_import'){
+    body.config=document.getElementById('configText').value;
+    body.vendor=document.getElementById('vendor').value;
+    body.device='imported-1';
+  } else {
+    body.intent=document.getElementById('intent').value;
+  }
+  try{
+    const r=await fetch(API+"/api/preflight/run",{method:"POST",
+      headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const data=await r.json();
+    if(!r.ok){render_err(data);} else {render(data);}
+  }catch(e){render_err({error:String(e),stage:"network"});}
+  finally{btn.disabled=false; setSteps(false);}
+}
+
+function render_err(d){
+  document.getElementById('c-verdict').innerHTML=
+    '<h3>Verdict</h3><div class="err">✕ '+(d.error||'request failed')+
+    '</div><div class="muted">stage: '+(d.stage||'?')+
+    (d.mode?' · mode: '+d.mode:'')+'</div>';
+  // clear stale panels so a failed run never shows a previous run's data
+  const blanks={'c-twin':'Digital twin','c-config':'Generated config (grounded)',
+                'c-evidence':'Evidence &amp; compliance'};
+  for(const id in blanks)
+    document.getElementById(id).innerHTML='<h3>'+blanks[id]+
+      '</h3><div class="muted">— run did not complete</div>';
+  document.getElementById('foot').textContent='';
+}
+
+let LAST_BUNDLE=null;
+async function downloadPdf(){
+  if(!LAST_BUNDLE) return;
+  const r=await fetch(API+"/api/preflight/evidence/pdf",{method:"POST",
+    headers:{"Content-Type":"application/json"},body:JSON.stringify(LAST_BUNDLE)});
+  if(!r.ok){alert("PDF failed: "+(await r.text()));return;}
+  const blob=await r.blob();
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download="aegis-evidence-"+(LAST_BUNDLE.run_id||"bundle").slice(0,12)+".pdf";
+  a.click(); URL.revokeObjectURL(a.href);
+}
+function render(b){
+  LAST_BUNDLE=b;
+  const dec=b.verdict.decision;
+  const cls=dec==='ship_ready'?'ship':dec==='blocked'?'block':'appr';
+  const label=dec.replace('_',' ').toUpperCase();
+  document.getElementById('c-verdict').innerHTML=
+    '<h3>Verdict</h3>'+
+    '<div class="verdict '+cls+'"><span class="dot"></span>'+label+'</div>'+
+    '<div class="muted" style="margin-top:8px">'+b.verdict.reason+'</div>'+
+    '<div class="kv"><span>risk tier</span><b>'+b.change.risk_tier+'</b></div>'+
+    '<div class="kv"><span>blast radius</span><b>'+
+      b.validation.blast_radius.severity+' · '+
+      b.validation.blast_radius.devices_affected+' device(s)</b></div>'+
+    '<div class="kv"><span>approval required</span><b>'+
+      (b.change.approval.required?('yes — '+(b.change.approval.granted_by||'PENDING')):'no')+
+      '</b></div>';
+
+  const t=b.twin;
+  document.getElementById('c-twin').innerHTML=
+    '<h3>Digital twin · '+t.topology+'</h3>'+
+    '<div class="kv"><span>engine</span><b>'+t.engine+'</b></div>'+
+    '<div class="kv"><span>nodes</span><b>'+t.node_count+'</b></div>'+
+    '<div class="kv"><span>converged</span><b>'+(t.converged?'✔ yes':'✕ no')+'</b></div>'+
+    '<div class="kv"><span>convergence</span><b>'+t.convergence_sec+'s</b></div>'+
+    '<div class="kv"><span>BGP sessions</span><b>'+
+      t.bgp_sessions.before+' → '+t.bgp_sessions.after+
+      (t.bgp_sessions.after<t.bgp_sessions.before?' ⚠':'')+'</b></div>'+
+    '<div class="dev">routes +'+b.validation.state_diff.routes_added.length+
+      ' / -'+b.validation.state_diff.routes_removed.length+
+      ' · sessions dropped: '+(b.validation.state_diff.sessions_dropped.join(', ')||'none')+'</div>';
+
+  document.getElementById('c-config').innerHTML='<h3>Generated config (grounded)</h3>'+
+    b.change.generated_configs.map(c=>
+      '<div class="dev">'+c.device+' · '+c.vendor+'</div>'+
+      '<pre>'+escapeHtml(c.config)+'</pre>'+
+      '<div class="dev">grounded: '+(c.grounded_commands.join(' · ')||'—')+'</div>'
+    ).join('');
+
+  const bf=b.validation.batfish;
+  document.getElementById('c-evidence').innerHTML='<h3>Evidence &amp; compliance</h3>'+
+    '<div class="kv"><span>batfish</span><b>'+bf.errors+' err · '+bf.warnings+
+      ' warn · '+bf.passed+' pass</b></div>'+
+    '<div style="margin:8px 0">'+
+      b.validation.compliance.map(x=>'<span class="chip '+
+        (x.status==='fail'?'fail':'pass')+'">'+x.framework+' '+x.control+
+        ' · '+x.status+'</span>').join('')+'</div>'+
+    (bf.findings.length?'<pre>'+escapeHtml(bf.findings.join('\n'))+'</pre>':'')+
+    '<div class="dev">rollback steps: '+b.rollback.plan.length+
+      ' · tested in twin: '+(b.rollback.tested_in_twin?'yes':'no')+'</div>'+
+    '<div style="margin-top:12px"><button onclick="downloadPdf()" '+
+      'style="background:transparent;border:1px solid var(--acc);color:var(--acc);'+
+      'font-weight:600">⬇ Download evidence PDF</button></div>';
+
+  document.getElementById('foot').innerHTML=
+    'run '+b.run_id+' · '+b.created_utc+' · generated_by '+b.integrity.generated_by+
+    ' · egress '+b.integrity.egress+'<br>sha256 '+b.integrity.sha256;
+}
+function escapeHtml(s){return (s||'').replace(/[&<>]/g,c=>(
+  {'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+</script>
+</body>
+</html>

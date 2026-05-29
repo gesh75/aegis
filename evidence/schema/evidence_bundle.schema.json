@@ -1,0 +1,157 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://aegis.local/schema/evidence_bundle.schema.json",
+  "title": "AEGIS Evidence Bundle",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["bundle_version", "run_id", "created_utc", "change", "twin",
+               "validation", "verdict", "integrity"],
+  "properties": {
+    "bundle_version": { "const": "1.0" },
+    "run_id":         { "type": "string", "minLength": 8 },
+    "created_utc":    { "type": "string", "format": "date-time" },
+    "operator":       { "type": "string" },
+
+    "change": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["intent", "source", "generated_configs", "risk_tier", "approval"],
+      "properties": {
+        "intent": { "type": "string" },
+        "source": { "enum": ["nl_intent", "config_import"] },
+        "generated_configs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["device", "vendor", "config", "grounded_commands"],
+            "properties": {
+              "device": { "type": "string" },
+              "vendor": { "enum": ["srlinux", "ceos", "frr", "junos", "ios", "panos"] },
+              "config": { "type": "string" },
+              "grounded_commands": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "risk_tier": { "enum": ["low", "medium", "high"] },
+        "approval": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["required"],
+          "properties": {
+            "required":    { "type": "boolean" },
+            "granted_by":  { "type": ["string", "null"] },
+            "granted_utc": { "type": ["string", "null"], "format": "date-time" }
+          }
+        }
+      }
+    },
+
+    "twin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine", "topology", "node_count", "converged",
+                   "convergence_sec", "bgp_sessions"],
+      "properties": {
+        "engine":          { "const": "containerlab" },
+        "topology":        { "type": "string" },
+        "node_count":      { "type": "integer", "minimum": 0 },
+        "converged":       { "type": "boolean" },
+        "convergence_sec": { "type": "number", "minimum": 0 },
+        "bgp_sessions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["before", "after"],
+          "properties": {
+            "before": { "type": "integer", "minimum": 0 },
+            "after":  { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["batfish", "state_diff", "blast_radius", "compliance"],
+      "properties": {
+        "batfish": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["errors", "warnings", "passed", "findings"],
+          "properties": {
+            "errors":   { "type": "integer", "minimum": 0 },
+            "warnings": { "type": "integer", "minimum": 0 },
+            "passed":   { "type": "integer", "minimum": 0 },
+            "findings": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "state_diff": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["routes_added", "routes_removed", "sessions_dropped"],
+          "properties": {
+            "routes_added":     { "type": "array", "items": { "type": "string" } },
+            "routes_removed":   { "type": "array", "items": { "type": "string" } },
+            "sessions_dropped": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "blast_radius": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["devices_affected", "severity"],
+          "properties": {
+            "devices_affected": { "type": "integer", "minimum": 0 },
+            "severity": { "enum": ["none", "low", "medium", "high", "critical"] }
+          }
+        },
+        "compliance": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["framework", "control", "status", "evidence"],
+            "properties": {
+              "framework": { "enum": ["pci_dss_v4", "soc2", "nist_800-53"] },
+              "control":   { "type": "string" },
+              "status":    { "enum": ["pass", "fail", "n/a"] },
+              "evidence":  { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+
+    "rollback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan", "tested_in_twin"],
+      "properties": {
+        "plan":           { "type": "array", "items": { "type": "string" } },
+        "tested_in_twin": { "type": "boolean" }
+      }
+    },
+
+    "verdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision", "reason"],
+      "properties": {
+        "decision": { "enum": ["ship_ready", "blocked", "needs_approval"] },
+        "reason":   { "type": "string" }
+      }
+    },
+
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "generated_by", "egress"],
+      "properties": {
+        "sha256":       { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "signed":       { "type": "boolean" },
+        "generated_by": { "const": "AEGIS" },
+        "egress":       { "const": "none" }
+      }
+    }
+  }
+}

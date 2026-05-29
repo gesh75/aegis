@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+# throwaway twin topology files (materialized at runtime)
+**/twin-*.clab.yml
+# generated artifacts
+tests/sample_bundles/*.pdf
+*.tar
+.DS_Store

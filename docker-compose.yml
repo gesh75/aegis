@@ -1,0 +1,11 @@
+# AEGIS community core — `docker compose up` then open http://localhost:8088/preflight
+services:
+  aegis:
+    build: .
+    image: aegis:local
+    container_name: aegis
+    ports:
+      - "8088:8088"
+    environment:
+      - AEGIS_PORT=8088
+    restart: unless-stopped

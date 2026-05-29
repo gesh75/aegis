@@ -1,0 +1,133 @@
+{
+  "bundle_version": "1.0",
+  "run_id": "b827bc229c8f41d98dd4500046e2bec2",
+  "created_utc": "2026-05-28T21:48:27.316080+00:00",
+  "operator": "unknown",
+  "change": {
+    "intent": "add static route 10.5.0.0/16 via edge-1",
+    "source": "nl_intent",
+    "generated_configs": [
+      {
+        "device": "edge-slice-node-1",
+        "vendor": "junos",
+        "config": "# (no actionable directive parsed)",
+        "grounded_commands": [
+          "set protocols bgp group"
+        ]
+      },
+      {
+        "device": "edge-slice-node-2",
+        "vendor": "ios",
+        "config": "# (no actionable directive parsed)",
+        "grounded_commands": [
+          "router bgp"
+        ]
+      },
+      {
+        "device": "edge-slice-node-3",
+        "vendor": "junos",
+        "config": "# (no actionable directive parsed)",
+        "grounded_commands": [
+          "set protocols bgp group"
+        ]
+      },
+      {
+        "device": "edge-slice-node-4",
+        "vendor": "ios",
+        "config": "# (no actionable directive parsed)",
+        "grounded_commands": [
+          "router bgp"
+        ]
+      },
+      {
+        "device": "edge-slice-node-5",
+        "vendor": "junos",
+        "config": "# (no actionable directive parsed)",
+        "grounded_commands": [
+          "set protocols bgp group"
+        ]
+      },
+      {
+        "device": "edge-slice-node-6",
+        "vendor": "ios",
+        "config": "# (no actionable directive parsed)",
+        "grounded_commands": [
+          "router bgp"
+        ]
+      }
+    ],
+    "risk_tier": "medium",
+    "approval": {
+      "required": false,
+      "granted_by": null,
+      "granted_utc": null
+    }
+  },
+  "twin": {
+    "engine": "containerlab",
+    "topology": "edge-slice",
+    "node_count": 4,
+    "converged": true,
+    "convergence_sec": 6.35,
+    "bgp_sessions": {
+      "before": 14,
+      "after": 14
+    }
+  },
+  "validation": {
+    "batfish": {
+      "errors": 0,
+      "warnings": 6,
+      "passed": 6,
+      "findings": [
+        "edge-slice-node-1: empty/uninterpretable change",
+        "edge-slice-node-2: empty/uninterpretable change",
+        "edge-slice-node-3: empty/uninterpretable change",
+        "edge-slice-node-4: empty/uninterpretable change",
+        "edge-slice-node-5: empty/uninterpretable change",
+        "edge-slice-node-6: empty/uninterpretable change"
+      ]
+    },
+    "state_diff": {
+      "routes_added": [
+        "10.40.0.0/24"
+      ],
+      "routes_removed": [],
+      "sessions_dropped": []
+    },
+    "blast_radius": {
+      "devices_affected": 1,
+      "severity": "low"
+    },
+    "compliance": [
+      {
+        "framework": "nist_800-53",
+        "control": "CM-3",
+        "status": "pass",
+        "evidence": "change verified in digital twin prior to production"
+      },
+      {
+        "framework": "nist_800-53",
+        "control": "CM-6",
+        "status": "pass",
+        "evidence": "config baseline enforced (no insecure directives)"
+      }
+    ]
+  },
+  "rollback": {
+    "plan": [
+      "no-op change: nothing to roll back"
+    ],
+    "tested_in_twin": true
+  },
+  "verdict": {
+    "decision": "ship_ready",
+    "reason": "medium-risk change verified in twin, no regressions"
+  },
+  "integrity": {
+    "sha256": "998cdc73b1a4a25770606490e52836d8bb4a170c5b7251513fc128253afbcb50",
+    "signed": false,
+    "generated_by": "AEGIS",
+    "egress": "none"
+  }
+}
