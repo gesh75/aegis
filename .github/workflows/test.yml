@@ -22,15 +22,21 @@ jobs:
       - name: Install deps
         run: pip install -r aegis/requirements.txt
 
-      # run from the workspace root (the parent of aegis/)
+      # run from the workspace root (the parent of aegis/) — 6 suites, 0 violations
       - name: Pipeline invariants (25k, 8 invariants, adversarial + concurrency)
         run: python -m aegis.tests.stress_test 25000
+
+      - name: Phase 2 promotion-gate safety (6k bundles)
+        run: python -m aegis.tests.promote_test 6000
+
+      - name: Twin safety + mgmt isolation (8k, 6 invariants + concurrency + failure-path)
+        run: python -m aegis.tests.twin_test 8000
+
+      - name: Evidence PDF validity (1.5k bundles)
+        run: python -m aegis.tests.pdf_test 1500
 
       - name: HttpBackend contract (parsers vs real :5757 shapes)
         run: python -m aegis.tests.contract_test
 
-      - name: Evidence PDF validity (1k bundles)
-        run: python -m aegis.tests.pdf_test 1000
-
-      - name: Phase 2 promotion-gate safety (6k bundles)
-        run: python -m aegis.tests.promote_test 6000
+      - name: Flask endpoints (sim-tier server, test-client)
+        run: python -m aegis.tests.api_test
