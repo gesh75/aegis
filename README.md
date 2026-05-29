@@ -17,6 +17,17 @@ examiner-ready evidence bundle.
 
 ![AEGIS architecture](docs/architecture.svg)
 
+## Demo
+
+[![AEGIS PreFlight — 64-second overview](docs/video_poster.png)](docs/overview_video.mp4)
+
+▶ **[Watch the 64-second overview](docs/overview_video.mp4)** (silent, captioned) ·
+**[narrated 2-minute cut](docs/overview_video_narrated.mp4)**
+
+<!-- INLINE PLAYER (optional, after first push): create a GitHub Release, drag
+     docs/overview_video.mp4 into it, copy the https://github.com/gesh75/aegis/assets/…
+     URL GitHub generates, and paste it here as a bare line — GitHub renders a video player. -->
+
 ## How it works
 
 ```
