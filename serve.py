@@ -22,7 +22,32 @@ from aegis.evidence.pdf import render_pdf
 
 _UI = os.path.join(os.path.dirname(__file__), "ui", "preflight_screen.html")
 
+# Content-Security-Policy shared by the response header and the UI <meta> tag.
+# default-src 'self' locks origins down; 'unsafe-inline' is required because the
+# PreFlight UI ships inline <style>, inline event handlers and one inline <script>
+# (no external assets, no eval). connect-src allows the same-origin API plus the
+# localhost fallback the UI uses when opened over http on a dev box.
+_CSP = ("default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "connect-src 'self' http://localhost:5757; "
+        "img-src 'self' data:; "
+        "base-uri 'none'; "
+        "form-action 'self'; "
+        "frame-ancestors 'none'")
+
 app = Flask(__name__)
+# Reject oversized request bodies before they are parsed (sim tier has no auth).
+app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024  # 2 MB
+
+
+@app.after_request
+def _security_headers(resp: Response) -> Response:
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Content-Security-Policy"] = _CSP
+    resp.headers["Referrer-Policy"] = "no-referrer"
+    return resp
 
 
 @app.get("/")
@@ -87,8 +112,10 @@ def evidence_pdf():
 
 def main():
     port = int(os.environ.get("AEGIS_PORT", "8088"))
+    # Bind loopback by default; require an explicit AEGIS_HOST=0.0.0.0 to expose it.
+    host = os.environ.get("AEGIS_HOST", "127.0.0.1")
     print(f"AEGIS community server (sim tier) — http://localhost:{port}/preflight")
-    app.run(host="0.0.0.0", port=port)
+    app.run(host=host, port=port)
 
 
 if __name__ == "__main__":
