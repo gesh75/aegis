@@ -13,6 +13,7 @@ Live mode (real Qwen3 + containerlab twin) lives in the integrated deployment
 """
 from __future__ import annotations
 import os
+import re
 
 from flask import Flask, Response, jsonify, request
 
@@ -105,7 +106,10 @@ def evidence_pdf():
         pdf = render_pdf(bundle)
     except Exception as e:  # noqa: BLE001
         return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
-    run = bundle.get("run_id", "bundle")[:12]
+    # run_id is client-supplied; sanitize before it lands in the Content-Disposition
+    # header. Legit run_ids are uuid4().hex (lowercase hex), so stripping to [a-f0-9]
+    # is lossless for them while blocking quote/breakout header-injection abuse.
+    run = re.sub(r"[^a-f0-9]", "", str(bundle.get("run_id", "bundle")))[:12] or "bundle"
     return Response(pdf, mimetype="application/pdf", headers={
         "Content-Disposition": f'attachment; filename="aegis-evidence-{run}.pdf"'})
 
