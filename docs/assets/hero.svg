@@ -1,0 +1,191 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" role="img" aria-labelledby="aegisTitle aegisDesc" fill="none">
+  <title id="aegisTitle">AEGIS — air-gapped change-validation architecture</title>
+  <desc id="aegisDesc">A proposed network-config change travels along a teal current through a containerlab digital-twin gate where BGP sessions reconverge, then a deterministic verification chain — guard, batfish, diff, compliance — stamps it before an amber sha256 wax seal locks onto a PCI/SOC2/NIST evidence badge, all inside a dashed air-gapped perimeter that nothing crosses outward.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/>
+      <stop offset="0.55" stop-color="#0d1526"/>
+      <stop offset="1" stop-color="#111a2b"/>
+    </linearGradient>
+    <radialGradient id="twinGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#2dd4bf" stop-opacity="0.32"/>
+      <stop offset="1" stop-color="#2dd4bf" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5eead4"/>
+      <stop offset="0.5" stop-color="#34d399"/>
+      <stop offset="1" stop-color="#f59e0b"/>
+    </linearGradient>
+    <linearGradient id="current" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#2dd4bf" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#2dd4bf" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#10b981" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#16324a"/>
+      <stop offset="1" stop-color="#0e2336"/>
+    </linearGradient>
+    <radialGradient id="seal" cx="0.4" cy="0.35" r="0.75">
+      <stop offset="0" stop-color="#f6c453"/>
+      <stop offset="0.6" stop-color="#f59e0b"/>
+      <stop offset="1" stop-color="#d4a017"/>
+    </radialGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softglow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="9" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <style>
+      @keyframes pulse { 0%,100%{opacity:.5} 50%{opacity:1} }
+      @keyframes breathe { 0%,100%{opacity:.18} 50%{opacity:.42} }
+      @keyframes drawline { to { stroke-dashoffset: 0 } }
+      @keyframes sealdrop {
+        0%,18%   { transform: translateY(-26px); opacity: 0 }
+        30%      { transform: translateY(0);     opacity: 1 }
+        38%      { transform: translateY(-4px) scale(1.04) }
+        46%,100% { transform: translateY(0)   scale(1) }
+      }
+      @keyframes flash { 0%,90%,100%{opacity:0} 94%{opacity:.85} }
+      @keyframes chip { 0%,40%{opacity:.25} 55%,100%{opacity:1} }
+      @keyframes converge { 0%,100%{stroke-dashoffset:60} 50%{stroke-dashoffset:0} }
+      .node { transform-box: fill-box; transform-origin: center; }
+      .pulse  { animation: pulse 2.8s ease-in-out infinite; }
+      .p2 { animation-delay: .5s } .p3 { animation-delay: 1s } .p4 { animation-delay: 1.5s }
+      .twinring { animation: breathe 3.4s ease-in-out infinite; }
+      .conv { stroke-dasharray: 6 6; animation: converge 2.6s ease-in-out infinite; }
+      .conv2 { animation-delay: .6s } .conv3 { animation-delay: 1.2s }
+      .underline { stroke-dasharray: 360; stroke-dashoffset: 360; animation: drawline 1.6s ease-out .4s forwards; }
+      .perim { stroke-dasharray: 10 8; animation: drawline 2.4s linear .2s forwards; stroke-dashoffset: 0; }
+      .seal { transform-box: fill-box; transform-origin: center; animation: sealdrop 6s ease-in-out infinite; }
+      .sealflash { animation: flash 6s ease-out infinite; }
+      .chip { transform-box: fill-box; transform-origin: center; }
+      .chipA { animation: chip 6s ease-in-out infinite; }
+      .chipB { animation: chip 6s ease-in-out infinite; animation-delay: .25s }
+      .chipC { animation: chip 6s ease-in-out infinite; animation-delay: .5s }
+      @media (prefers-reduced-motion: reduce){
+        * { animation: none !important; }
+        .underline, .perim { stroke-dashoffset: 0; }
+        .seal { transform: translateY(0); opacity: 1; }
+        .chip { opacity: 1; }
+      }
+    </style>
+  </defs>
+
+  <!-- background -->
+  <rect width="1200" height="360" fill="url(#bg)"/>
+  <!-- dot grid texture -->
+  <g fill="#1e2c44" opacity="0.55">
+    <circle cx="60" cy="60" r="1.4"/><circle cx="160" cy="60" r="1.4"/><circle cx="260" cy="60" r="1.4"/><circle cx="360" cy="60" r="1.4"/><circle cx="460" cy="60" r="1.4"/><circle cx="560" cy="60" r="1.4"/><circle cx="660" cy="60" r="1.4"/><circle cx="760" cy="60" r="1.4"/><circle cx="860" cy="60" r="1.4"/><circle cx="960" cy="60" r="1.4"/><circle cx="1060" cy="60" r="1.4"/><circle cx="1160" cy="60" r="1.4"/>
+    <circle cx="60" cy="160" r="1.4"/><circle cx="160" cy="160" r="1.4"/><circle cx="260" cy="160" r="1.4"/><circle cx="360" cy="160" r="1.4"/><circle cx="460" cy="160" r="1.4"/><circle cx="560" cy="160" r="1.4"/><circle cx="660" cy="160" r="1.4"/><circle cx="760" cy="160" r="1.4"/><circle cx="860" cy="160" r="1.4"/><circle cx="960" cy="160" r="1.4"/><circle cx="1060" cy="160" r="1.4"/><circle cx="1160" cy="160" r="1.4"/>
+    <circle cx="60" cy="260" r="1.4"/><circle cx="160" cy="260" r="1.4"/><circle cx="260" cy="260" r="1.4"/><circle cx="360" cy="260" r="1.4"/><circle cx="460" cy="260" r="1.4"/><circle cx="560" cy="260" r="1.4"/><circle cx="660" cy="260" r="1.4"/><circle cx="760" cy="260" r="1.4"/><circle cx="860" cy="260" r="1.4"/><circle cx="960" cy="260" r="1.4"/><circle cx="1060" cy="260" r="1.4"/><circle cx="1160" cy="260" r="1.4"/>
+    <circle cx="60" cy="320" r="1.4"/><circle cx="360" cy="320" r="1.4"/><circle cx="660" cy="320" r="1.4"/><circle cx="960" cy="320" r="1.4"/>
+  </g>
+
+  <!-- air-gapped perimeter boundary -->
+  <rect class="perim" x="26" y="22" width="1148" height="316" rx="20" stroke="#5b6b82" stroke-width="1.6" stroke-dasharray="10 8"/>
+  <g transform="translate(44,40)">
+    <rect x="0" y="-14" width="118" height="20" rx="10" fill="#111a2b" stroke="#5b6b82" stroke-width="1"/>
+    <circle cx="13" cy="-4" r="3.2" fill="#2dd4bf"/>
+    <text x="26" y="-1" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="10.5" font-weight="700" letter-spacing="0.6" fill="#c9d3e0">AIR-GAPPED</text>
+  </g>
+
+  <!-- ===== teal current spine ===== -->
+  <path id="spine" d="M150 196 H1010" stroke="url(#current)" stroke-width="3" opacity="0.85"/>
+  <path id="spine2" d="M150 196 H1010" stroke="#1f3b4d" stroke-width="1" opacity="0.6"/>
+
+  <!-- traveling config packets along the current -->
+  <g filter="url(#glow)">
+    <circle r="3.5" fill="#5eead4"><animateMotion dur="3.4s" repeatCount="indefinite" rotate="auto"><mpath href="#spine"/></animateMotion></circle>
+    <circle r="3" fill="#34d399"><animateMotion dur="3.4s" begin="1s" repeatCount="indefinite"><mpath href="#spine"/></animateMotion></circle>
+    <circle r="2.6" fill="#2dd4bf"><animateMotion dur="3.4s" begin="2s" repeatCount="indefinite"><mpath href="#spine"/></animateMotion></circle>
+  </g>
+
+  <!-- ===== STAGE 1: glowing config-change card ===== -->
+  <g class="node pulse" filter="url(#softglow)">
+    <rect x="92" y="158" width="92" height="76" rx="10" fill="url(#card)" stroke="#2dd4bf" stroke-width="1.6"/>
+    <rect x="104" y="172" width="58" height="4" rx="2" fill="#5eead4" opacity="0.9"/>
+    <rect x="104" y="184" width="44" height="3" rx="1.5" fill="#3a6c7e"/>
+    <rect x="104" y="194" width="52" height="3" rx="1.5" fill="#3a6c7e"/>
+    <rect x="104" y="204" width="36" height="3" rx="1.5" fill="#3a6c7e"/>
+    <rect x="104" y="214" width="48" height="3" rx="1.5" fill="#3a6c7e"/>
+  </g>
+  <text x="138" y="252" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="10.5" font-weight="700" fill="#5eead4">intent / config</text>
+  <text x="138" y="266" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="9" fill="#5b6b82">generate (LLM)</text>
+
+  <!-- ===== STAGE 2: containerlab digital-twin gate ===== -->
+  <g transform="translate(370,196)">
+    <circle r="76" fill="url(#twinGlow)"/>
+    <circle class="twinring" r="62" fill="none" stroke="#2dd4bf" stroke-width="1.4" stroke-dasharray="4 6"/>
+    <!-- mini router nodes mirroring production -->
+    <g class="node pulse"><circle cx="0" cy="-50" r="8" fill="#0e2336" stroke="#34d399" stroke-width="1.6"/></g>
+    <g class="node pulse p2"><circle cx="47" cy="-16" r="8" fill="#0e2336" stroke="#34d399" stroke-width="1.6"/></g>
+    <g class="node pulse p3"><circle cx="29" cy="42" r="8" fill="#0e2336" stroke="#34d399" stroke-width="1.6"/></g>
+    <g class="node pulse p4"><circle cx="-29" cy="42" r="8" fill="#0e2336" stroke="#34d399" stroke-width="1.6"/></g>
+    <g class="node pulse p2"><circle cx="-47" cy="-16" r="8" fill="#0e2336" stroke="#34d399" stroke-width="1.6"/></g>
+    <!-- BGP/EVPN links reconverging -->
+    <path class="conv"  d="M0 -50 L47 -16" stroke="#10b981" stroke-width="1.8" fill="none"/>
+    <path class="conv conv2" d="M47 -16 L29 42" stroke="#10b981" stroke-width="1.8" fill="none"/>
+    <path class="conv conv3" d="M29 42 L-29 42" stroke="#10b981" stroke-width="1.8" fill="none"/>
+    <path class="conv conv2" d="M-29 42 L-47 -16" stroke="#10b981" stroke-width="1.8" fill="none"/>
+    <path class="conv conv3" d="M-47 -16 L0 -50" stroke="#10b981" stroke-width="1.8" fill="none"/>
+    <path class="conv"  d="M0 -50 L29 42" stroke="#10b981" stroke-width="1.2" fill="none" opacity="0.6"/>
+    <path class="conv conv2" d="M47 -16 L-47 -16" stroke="#10b981" stroke-width="1.2" fill="none" opacity="0.6"/>
+  </g>
+  <text x="370" y="300" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="10.5" font-weight="700" fill="#34d399">containerlab twin</text>
+  <text x="370" y="314" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="9" fill="#5b6b82">spawn · apply · BGP converge · diff</text>
+
+  <!-- ===== STAGE 3: deterministic verification chain ===== -->
+  <g font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
+    <g class="node pulse" filter="url(#glow)">
+      <rect x="556" y="170" width="74" height="52" rx="9" fill="#111a2b" stroke="#2dd4bf" stroke-width="1.4"/>
+      <text x="593" y="193" text-anchor="middle" font-size="11" font-weight="700" fill="#cfe9e3">guard</text>
+      <text x="593" y="208" text-anchor="middle" font-size="8" fill="#5b6b82">precheck</text>
+    </g>
+    <g class="node pulse p2" filter="url(#glow)">
+      <rect x="640" y="170" width="74" height="52" rx="9" fill="#111a2b" stroke="#2dd4bf" stroke-width="1.4"/>
+      <text x="677" y="193" text-anchor="middle" font-size="11" font-weight="700" fill="#cfe9e3">batfish</text>
+      <text x="677" y="208" text-anchor="middle" font-size="8" fill="#5b6b82">static</text>
+    </g>
+    <g class="node pulse p3" filter="url(#glow)">
+      <rect x="724" y="170" width="74" height="52" rx="9" fill="#111a2b" stroke="#34d399" stroke-width="1.4"/>
+      <text x="761" y="193" text-anchor="middle" font-size="11" font-weight="700" fill="#cfe9e3">diff</text>
+      <text x="761" y="208" text-anchor="middle" font-size="8" fill="#5b6b82">risk tier</text>
+    </g>
+    <g class="node pulse p4" filter="url(#glow)">
+      <rect x="808" y="170" width="86" height="52" rx="9" fill="#111a2b" stroke="#f59e0b" stroke-width="1.4"/>
+      <text x="851" y="193" text-anchor="middle" font-size="11" font-weight="700" fill="#fbe2b0">compliance</text>
+      <text x="851" y="208" text-anchor="middle" font-size="8" fill="#5b6b82">PCI·SOC2·NIST</text>
+    </g>
+  </g>
+  <text x="725" y="255" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="9.5" fill="#5b6b82">deterministic verification — no AI after this point</text>
+
+  <!-- ===== STAGE 4: sealed compliance evidence badge ===== -->
+  <g transform="translate(978,196)">
+    <!-- evidence badge shield -->
+    <path d="M0 -54 L46 -36 L46 22 Q46 52 0 66 Q-46 52 -46 22 L-46 -36 Z" fill="#0f1d22" stroke="#10b981" stroke-width="1.8"/>
+    <!-- compliance chips lighting up -->
+    <g class="chip chipA"><rect x="-32" y="-26" width="64" height="15" rx="4" fill="#13322a" stroke="#10b981" stroke-width="1"/><text x="0" y="-15" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="8.5" font-weight="700" fill="#6ee7b7">PCI DSS v4</text></g>
+    <g class="chip chipB"><rect x="-32" y="-7" width="64" height="15" rx="4" fill="#13322a" stroke="#10b981" stroke-width="1"/><text x="0" y="4" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="8.5" font-weight="700" fill="#6ee7b7">SOC2 CC8.1</text></g>
+    <g class="chip chipC"><rect x="-32" y="12" width="64" height="15" rx="4" fill="#13322a" stroke="#10b981" stroke-width="1"/><text x="0" y="23" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="8.5" font-weight="700" fill="#6ee7b7">NIST CM-3</text></g>
+
+    <!-- amber wax seal pressing down -->
+    <g class="seal">
+      <circle r="22" cy="44" fill="url(#seal)" stroke="#b8860b" stroke-width="1.6"/>
+      <circle r="16" cy="44" fill="none" stroke="#7a5b12" stroke-width="1" stroke-dasharray="2 3"/>
+      <text x="0" y="41" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-size="7.5" font-weight="700" fill="#3a2c08">sha256</text>
+      <text x="0" y="51" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-size="6.5" fill="#3a2c08">egress:none</text>
+    </g>
+    <g class="sealflash"><circle r="30" cy="44" fill="none" stroke="#fbbf24" stroke-width="2"/></g>
+  </g>
+  <text x="978" y="298" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="10.5" font-weight="700" fill="#f59e0b">sealed evidence bundle</text>
+  <text x="978" y="312" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="9" fill="#5b6b82">tamper-evident · examiner-ready PDF</text>
+
+  <!-- ===== title block ===== -->
+  <text x="600" y="72" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="50" font-weight="800" letter-spacing="2" fill="url(#title)">AEGIS</text>
+  <path class="underline" d="M480 92 H720" stroke="#2dd4bf" stroke-width="2.6" stroke-linecap="round"/>
+  <text x="600" y="118" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="15" font-weight="600" fill="#c9d3e0">Air-gapped Evidence-Grade Inspection System</text>
+  <text x="600" y="138" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="11.5" fill="#5b6b82">preflight every change against a real digital twin — the LLM proposes inside the wall, only a sealed badge ever leaves</text>
+</svg>
