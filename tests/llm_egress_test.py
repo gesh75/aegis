@@ -425,6 +425,18 @@ def test_single_egress_completion_post_DEFERRED() -> None:
 
 # ── helpers + runner ───────────────────────────────────────────────────────────
 
+def test_is_loopback_rejects_spoofed_prefix() -> None:
+    """Regression for the parser-differential the security review caught: a host that only
+    *starts with* '127.' (or contains 'localhost') but resolves OFF-perimeter must NOT be
+    treated as loopback. Strict ipaddress parsing (no DNS) closes the bypass."""
+    assert not is_loopback("http://127.evil.com")
+    assert not is_loopback("http://127.0.0.1.evil.com")
+    assert not is_loopback("http://localhost.evil.com")
+    assert not is_loopback("http://")            # empty / relative host rejected
+    assert is_loopback("http://[::1]:5757")       # genuine ipv6 loopback
+    assert is_loopback("http://127.5.5.5")        # genuine 127.0.0.0/8
+
+
 def _aegis_root() -> Path:
     here = Path(__file__).resolve()
     for parent in here.parents:

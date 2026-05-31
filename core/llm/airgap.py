@@ -12,30 +12,45 @@ Import-safe, fully type-hinted, no network — unit-testable on day one. No secr
 
 NOTE: AEGIS's cloud backend uses raw httpx (no `import anthropic`) precisely so that
 invariant #3 holds even when the cloud path IS exercised in a non-air-gapped build.
+
+Security: `is_loopback` parses the host with `ipaddress` (NOT a string prefix), so a
+spoofed hostname like ``127.evil.com`` or ``127.0.0.1.attacker.com`` — which would pass a
+naive ``startswith("127.")`` yet resolve OFF-perimeter — is correctly rejected. No DNS
+resolution is performed: resolving an attacker-supplied host would itself be egress, which
+is exactly what air-gap mode forbids.
 """
 from __future__ import annotations
 
 import sys
+from ipaddress import ip_address
 from urllib.parse import urlparse
 
 _CLOUD_PROVIDER = "anthropic-cloud"
 
-# Loopback hosts allowed even in air-gap mode (in-perimeter only).
-_LOOPBACK_HOSTS: frozenset[str] = frozenset({"localhost", "127.0.0.1", "::1", ""})
+# Literal non-IP hostnames allowed in air-gap mode (loopback aliases only).
+_LOOPBACK_NAMES: frozenset[str] = frozenset({"localhost", "ip6-localhost"})
 
 
 def is_loopback(url: str) -> bool:
-    """True only for loopback / .local hosts. An empty host (relative URL) counts as
-    loopback because the existing http_backend posts to absolute in-perimeter URLs only;
-    a bare host means same-host."""
+    """True only for a genuine loopback address (127.0.0.0/8 or ::1), the literal name
+    'localhost', or a reserved, non-routable '.local' mDNS host (in-perimeter only).
+
+    Uses strict `ipaddress` parsing rather than a string prefix, so a host that merely
+    *starts with* "127." but is actually a routable name (e.g. ``127.evil.com``) is
+    rejected. An empty/relative host is rejected (never auto-allowed). No DNS lookup is
+    performed — resolving an external host would itself violate the air-gap.
+    """
     host = (urlparse(url).hostname or "").lower()
-    if host in _LOOPBACK_HOSTS:
+    if not host:
+        return False  # reject empty / relative — never auto-allow
+    if host in _LOOPBACK_NAMES:
         return True
-    if host.endswith(".local"):
-        return True
-    if host.startswith("127."):  # 127.0.0.0/8 is all loopback
-        return True
-    return False
+    try:
+        return ip_address(host).is_loopback  # 127.0.0.0/8 and ::1, strictly
+    except ValueError:
+        # Not a literal IP. Only the reserved, non-internet-routable mDNS suffix is
+        # treated as in-perimeter (RFC 6762); everything else is non-loopback.
+        return host.endswith(".local")
 
 
 def assert_airgap_ok(provider: str, base_url: str) -> None:
