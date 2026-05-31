@@ -39,24 +39,24 @@ it; an auditor consumes the sealed PDF. No actor or line reaches outside the wal
 
 ```mermaid
 flowchart LR
-    OP([👤 Operator<br/>change author]):::actor
-    APP([✅ Approver<br/>grants token]):::actor
-    AUD([🔎 Auditor<br/>examiner]):::actor
+    OP([Operator - change author]):::actor
+    APP([Approver - grants token]):::actor
+    AUD([Auditor - examiner]):::actor
 
-    subgraph PERIM["🔒 Air-gapped perimeter — egress: none"]
+    subgraph PERIM["Air-gapped perimeter - egress none"]
         direction LR
-        AEGIS{{AEGIS<br/>preflight + evidence engine}}:::core
-        QWEN[/Self-hosted Qwen3<br/>only AI dependency/]:::ai
-        TWIN[(containerlab twin<br/>multi-vendor routers)]:::twin
-        DCN[DCN_Network_Tool :5757<br/>batfish · nornir · pyats]:::svc
+        AEGIS{{"AEGIS - preflight and evidence engine"}}:::core
+        QWEN[/"Self-hosted Qwen3 - only AI dependency"/]:::ai
+        TWIN[("containerlab twin - multi-vendor routers")]:::twin
+        DCN["DCN_Network_Tool 5757 - batfish, nornir, pyats"]:::svc
     end
 
-    PROD[(Production devices<br/>approval-gated push)]:::prod
+    PROD[("Production devices - approval-gated push")]:::prod
 
-    OP -->|intent / config| AEGIS
+    OP -->|"intent or config"| AEGIS
     APP -->|approval token| AEGIS
     AEGIS -->|generate_config| QWEN
-    AEGIS -->|spawn · apply · converge| TWIN
+    AEGIS -->|"spawn, apply, converge"| TWIN
     AEGIS -.->|live tier| DCN
     AEGIS -->|sealed PDF bundle| AUD
     AEGIS -.->|gated dry-run connector| PROD
@@ -81,35 +81,35 @@ community sim tier.
 
 ```mermaid
 flowchart TB
-    UI["serve.py + ui/preflight_screen.html<br/>Flask sim-tier server · /api/preflight/run"]:::edge
+    UI["serve.py and ui preflight_screen.html - Flask sim-tier server"]:::edge
 
-    subgraph ORCH["core/orchestrator — deterministic engine"]
+    subgraph ORCH["core/orchestrator - deterministic engine"]
         direction LR
-        PIPE[pipeline.py<br/>run_preflight]:::core
-        GUARD[guards.py<br/>precheck · risk_tier · approval]:::core
-        ROLL[rollback.py<br/>build_rollback_plan]:::core
+        PIPE["pipeline.py - run_preflight"]:::core
+        GUARD["guards.py - precheck, risk_tier, approval"]:::core
+        ROLL["rollback.py - build_rollback_plan"]:::core
     end
 
-    subgraph BACK["core/backends — pluggable Protocol"]
+    subgraph BACK["core/backends - pluggable Protocol"]
         direction LR
-        BASE[base.py<br/>Backend Protocol + TypedDicts]:::proto
-        SIM[simulator.py<br/>seeded, zero-dep]:::svc
-        HTTP[http_backend.py<br/>:5757 + Qwen3]:::svc
+        BASE["base.py - Backend Protocol and TypedDicts"]:::proto
+        SIM["simulator.py - seeded, zero-dep"]:::svc
+        HTTP["http_backend.py - 5757 and Qwen3"]:::svc
     end
 
-    subgraph EVID["evidence — seal & render"]
+    subgraph EVID["evidence - seal and render"]
         direction LR
-        BUND[bundler.py<br/>sha256 seal · egress=none]:::data
-        COMP[compliance.py<br/>PCI · SOC2 · NIST crosswalk]:::accent
-        PDF[pdf.py<br/>examiner-ready PDF]:::accent
-        SCHEMA[schema/<br/>evidence_bundle.schema.json]:::data
+        BUND["bundler.py - sha256 seal, egress none"]:::data
+        COMP["compliance.py - PCI, SOC2, NIST crosswalk"]:::accent
+        PDF["pdf.py - examiner-ready PDF"]:::accent
+        SCHEMA["schema - evidence_bundle.schema.json"]:::data
     end
 
-    subgraph PROM["core/promote — Phase 2 gate"]
+    subgraph PROM["core/promote - Phase 2 gate"]
         direction LR
-        GATE[gate.py<br/>G1-G4 rules]:::accent
-        PROMO[promote.py<br/>sealed promotion record]:::accent
-        CONN[connectors.py<br/>DryRun default · live inert]:::edge
+        GATE["gate.py - G1-G4 rules"]:::accent
+        PROMO["promote.py - sealed promotion record"]:::accent
+        CONN["connectors.py - DryRun default, live inert"]:::edge
     end
 
     UI --> PIPE
@@ -152,22 +152,22 @@ sequenceDiagram
     participant B as Backend
     participant Ev as bundler
 
-    Op->>Srv: POST /api/preflight/run {intent, lab, frameworks}
-    Srv->>Pipe: run_preflight(SimulatorBackend)
-    Pipe->>G: precheck_intent(intent)
+    Op->>Srv: POST /api/preflight/run intent, lab, frameworks
+    Srv->>Pipe: run_preflight SimulatorBackend
+    Pipe->>G: precheck_intent intent
     alt unsafe input
-        G-->>Srv: PreflightError → HTTP 400
+        G-->>Srv: PreflightError to HTTP 400
     else valid
-        Pipe->>B: generate_config (LLM, only AI step)
-        Pipe->>B: batfish_check (static analysis)
-        Pipe->>B: spawn_twin + apply_and_converge
-        Pipe->>B: state_diff (routes / sessions delta)
-        Pipe->>G: risk_tier + approval_required
-        Pipe->>Pipe: map_controls · rollback · verdict
-        Pipe->>Ev: build_bundle → sha256 seal (egress=none)
-        Note over Pipe,B: finally → teardown_twin (always)
+        Pipe->>B: generate_config - LLM, only AI step
+        Pipe->>B: batfish_check - static analysis
+        Pipe->>B: spawn_twin and apply_and_converge
+        Pipe->>B: state_diff - routes and sessions delta
+        Pipe->>G: risk_tier and approval_required
+        Pipe->>Pipe: map_controls, rollback, verdict
+        Pipe->>Ev: build_bundle to sha256 seal, egress none
+        Note over Pipe,B: finally teardown_twin always
         Ev-->>Srv: sealed JSON bundle
-        Srv-->>Op: bundle (+ optional PDF / promotion)
+        Srv-->>Op: bundle plus optional PDF or promotion
     end
 ```
 
@@ -181,17 +181,17 @@ egress to none. Everything between is teal verification.
 
 ```mermaid
 flowchart LR
-    IN([intent / pasted config]):::in
-    GU[guard<br/>precheck]:::ver
-    GEN[generate<br/>LLM propose]:::ai
-    BF{batfish<br/>static check}:::gate
-    TWIN[spawn twin<br/>apply + converge]:::ver
-    DIFF[state diff<br/>blast radius]:::ver
-    RISK[risk tier<br/>+ approval]:::ver
-    MAP[compliance<br/>crosswalk]:::accent
-    RB[rollback<br/>plan]:::ver
+    IN(["intent or pasted config"]):::in
+    GU["guard - precheck"]:::ver
+    GEN["generate - LLM propose"]:::ai
+    BF{"batfish - static check"}:::gate
+    TWIN["spawn twin - apply and converge"]:::ver
+    DIFF["state diff - blast radius"]:::ver
+    RISK["risk tier - and approval"]:::ver
+    MAP["compliance - crosswalk"]:::accent
+    RB["rollback - plan"]:::ver
     VERD{verdict}:::gate
-    SEAL[(sealed bundle<br/>sha256 · egress=none)]:::seal
+    SEAL[("sealed bundle - sha256, egress none")]:::seal
 
     IN --> GU --> GEN --> BF
     BF -->|errors| VERD
@@ -237,8 +237,8 @@ classDiagram
     }
     class BundleShapes {
         <<TypedDict>>
-        +Change · Twin · Validation
-        +Compliance · Rollback · Verdict
+        +Change, Twin, Validation
+        +Compliance, Rollback, Verdict
     }
     Backend <|.. SimulatorBackend : implements
     Backend <|.. HttpBackend : implements
@@ -256,9 +256,9 @@ four rules (G1–G4) decide whether the change reaches a connector — dry-run b
 ```mermaid
 stateDiagram-v2
     [*] --> Verdict
-    Verdict --> Blocked: batfish errors / BGP regression
-    Verdict --> NeedsApproval: medium / high risk
-    Verdict --> ShipReady: clean + low risk
+    Verdict --> Blocked: batfish errors or BGP regression
+    Verdict --> NeedsApproval: medium or high risk
+    Verdict --> ShipReady: clean and low risk
 
     Blocked --> [*]
     NeedsApproval --> Gate: approver + token

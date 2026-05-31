@@ -59,24 +59,24 @@ auditor consumes the sealed PDF — no actor or line ever reaches outside the wa
 
 ```mermaid
 flowchart LR
-    OP([👤 Operator<br/>change author]):::actor
-    APP([✅ Approver<br/>grants token]):::actor
-    AUD([🔎 Auditor<br/>examiner]):::actor
+    OP([Operator - change author]):::actor
+    APP([Approver - grants token]):::actor
+    AUD([Auditor - examiner]):::actor
 
-    subgraph PERIM["🔒 Air-gapped perimeter — egress: none"]
+    subgraph PERIM["Air-gapped perimeter - egress none"]
         direction LR
-        AEGIS{{AEGIS<br/>preflight + evidence engine}}:::core
-        QWEN[/Self-hosted Qwen3<br/>only AI dependency/]:::ai
-        TWIN[(containerlab twin<br/>multi-vendor routers)]:::twin
-        DCN[DCN_Network_Tool :5757<br/>batfish · nornir · pyats]:::svc
+        AEGIS{{"AEGIS - preflight and evidence engine"}}:::core
+        QWEN[/"Self-hosted Qwen3 - only AI dependency"/]:::ai
+        TWIN[("containerlab twin - multi-vendor routers")]:::twin
+        DCN["DCN_Network_Tool 5757 - batfish, nornir, pyats"]:::svc
     end
 
-    PROD[(Production devices<br/>approval-gated push)]:::prod
+    PROD[("Production devices - approval-gated push")]:::prod
 
-    OP -->|intent / config| AEGIS
+    OP -->|"intent or config"| AEGIS
     APP -->|approval token| AEGIS
     AEGIS -->|generate_config| QWEN
-    AEGIS -->|spawn · apply · converge| TWIN
+    AEGIS -->|"spawn, apply, converge"| TWIN
     AEGIS -.->|live tier| DCN
     AEGIS -->|sealed PDF bundle| AUD
     AEGIS -.->|gated dry-run connector| PROD
