@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/assets/hero.svg" alt="AEGIS — architecture" width="100%"></p>
+
 # AEGIS
 
 > **Air-gapped Evidence-Grade Inspection System** — preflight network changes against a
@@ -48,6 +50,49 @@ authorizes, and the sealed bundle proves nothing left the perimeter.
 | Hosting | SaaS | cloud | **on-prem / air-gapped** |
 | LLM | cloud | cloud | **self-hosted (zero egress)** |
 | Output | report | — | **sealed, PCI/SOC2/NIST-mapped evidence + PDF** |
+
+## 🏛️ Architecture
+
+Everything runs inside an **air-gapped perimeter**: the operator submits a change, a
+self-hosted Qwen3 LLM proposes config, a throwaway containerlab twin verifies it, and an
+auditor consumes the sealed PDF — no actor or line ever reaches outside the wall.
+
+```mermaid
+flowchart LR
+    OP([Operator - change author]):::actor
+    APP([Approver - grants token]):::actor
+    AUD([Auditor - examiner]):::actor
+
+    subgraph PERIM["Air-gapped perimeter - egress none"]
+        direction LR
+        AEGIS{{"AEGIS - preflight and evidence engine"}}:::core
+        QWEN[/"Self-hosted Qwen3 - only AI dependency"/]:::ai
+        TWIN[("containerlab twin - multi-vendor routers")]:::twin
+        DCN["DCN_Network_Tool 5757 - batfish, nornir, pyats"]:::svc
+    end
+
+    PROD[("Production devices - approval-gated push")]:::prod
+
+    OP -->|"intent or config"| AEGIS
+    APP -->|approval token| AEGIS
+    AEGIS -->|generate_config| QWEN
+    AEGIS -->|"spawn, apply, converge"| TWIN
+    AEGIS -.->|live tier| DCN
+    AEGIS -->|sealed PDF bundle| AUD
+    AEGIS -.->|gated dry-run connector| PROD
+
+    classDef actor fill:#475569,stroke:#94a3b8,color:#fff
+    classDef core fill:#0d9488,stroke:#5eead4,color:#fff
+    classDef ai fill:#7c3aed,stroke:#a78bfa,color:#fff
+    classDef twin fill:#059669,stroke:#34d399,color:#fff
+    classDef svc fill:#0ea5e9,stroke:#38bdf8,color:#fff
+    classDef prod fill:#c0392b,stroke:#fb7185,color:#fff
+    class PERIM core
+```
+
+📐 **Full architecture** — system context, container/component map, primary sequence, data
+flow, the `Backend` Protocol class map, and the verdict/promotion-gate decision tree — lives in
+**[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ## Run the demo (community / sim tier — fully offline)
 

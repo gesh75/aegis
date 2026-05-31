@@ -10,7 +10,7 @@ There is a category of products built to close this gap. Forward Predict offers 
 
 For a regulated network, that is a non-starter — and not as a preference. Banks, telcos, government, and healthcare operators run under data-residency and architecture-disclosure constraints where the topology and device configuration *are* the sensitive artifact. Sending them to a SaaS analyzer is the exact thing the control framework exists to prevent. The auditor is not asking whether the tool is accurate. The auditor is asking where the data went. "It was encrypted in transit to a third party" is still an answer that fails the question.
 
-So the most validation-hungry networks on the planet are locked out of the tools built to validate them. That is the gap **AEGIS** fills: an open-source (Apache-2.0), self-hosted, air-gapped pre-deployment change validator. You run it offline — `docker compose up`, open `localhost:8088/preflight` — and nothing about your network ever leaves the rack.
+So the most validation-hungry networks on the planet are locked out of the tools built to validate them. That is the gap **AEGIS** fills: an open-source (Apache-2.0), self-hosted, air-gapped pre-deployment change validator. The one-command build — `docker compose up`, open `localhost:8088/preflight` — runs the full loop offline against a built-in simulator, so you can try it on a laptop; point it at your own containerlab and self-hosted LLM for the real fabric. Either way, nothing about your network ever leaves the rack.
 
 ## Guarded-agentic: the LLM proposes, the pipeline verifies
 
@@ -36,7 +36,7 @@ The self-hosted LLM (Qwen3 via Ollama, for example) means even the one AI step k
 
 ## A real twin, not a model of one
 
-The validation core is emulation, not approximation. The twin is a real containerlab fabric running real vendor control planes — Nokia SR Linux, Arista cEOS, FRR — booting their actual routing daemons. When AEGIS says BGP converged, it is because BGP converged on a real `bgpd`, not because a solver concluded it should.
+The validation core is emulation, not approximation. The twin is a real containerlab fabric running real vendor control planes — Nokia SR Linux, Arista cEOS, FRR — booting their actual routing daemons. When AEGIS says BGP converged, it is because BGP converged on a real `bgpd`, not because a solver concluded it should. (The open-source quickstart runs this loop against a simulator so you can evaluate it on a laptop; the real-fabric twin is the self-hosted tier — see `docs/GO_LIVE.md`.)
 
 A mathematical twin reasons over a model of protocol behavior. That is fast and it scales, but it is only ever as correct as the model. A real twin runs the same software image that will run in production, so it surfaces the messy, vendor-specific, timing-dependent behavior a model abstracts away — the exact class of failure that makes change windows go sideways.
 
