@@ -41,6 +41,9 @@ pipeline invariants (25k runs) · promotion gate (6k) · twin safety + mgmt isol
 git clone https://github.com/gesh75/aegis && cd aegis
 docker compose up        # → http://localhost:8088/preflight
 ```
+This build runs the full loop against a **built-in simulator** so you can evaluate it on a
+laptop. Point it at your own **containerlab + self-hosted LLM** for the real-fabric twin — see
+[`docs/GO_LIVE.md`](https://github.com/gesh75/aegis/blob/main/docs/GO_LIVE.md).
 
 Apache-2.0. Full project log: [`docs/PHASES.md`](https://github.com/gesh75/aegis/blob/main/docs/PHASES.md) · go-live: [`docs/GO_LIVE.md`](https://github.com/gesh75/aegis/blob/main/docs/GO_LIVE.md)
 
