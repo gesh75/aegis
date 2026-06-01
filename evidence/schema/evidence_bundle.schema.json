@@ -7,7 +7,7 @@
   "required": ["bundle_version", "run_id", "created_utc", "change", "twin",
                "validation", "verdict", "integrity"],
   "properties": {
-    "bundle_version": { "const": "1.0" },
+    "bundle_version": { "const": "1.1" },
     "run_id":         { "type": "string", "minLength": 8 },
     "created_utc":    { "type": "string", "format": "date-time" },
     "operator":       { "type": "string" },
@@ -15,7 +15,8 @@
     "change": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["intent", "source", "generated_configs", "risk_tier", "approval"],
+      "required": ["intent", "source", "generated_configs", "risk_tier", "approval",
+                   "model_identity"],
       "properties": {
         "intent": { "type": "string" },
         "source": { "enum": ["nl_intent", "config_import"] },
@@ -42,6 +43,23 @@
             "required":    { "type": "boolean" },
             "granted_by":  { "type": ["string", "null"] },
             "granted_utc": { "type": ["string", "null"], "format": "date-time" }
+          }
+        },
+
+        "model_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The proposing model, sealed into the bundle SHA-256 (the #4 wedge). LOCAL backends carry a real weights-sha256; CLOUD backends carry an honest identity-claim with model_hash=null; config_import/no-model runs carry _UNKNOWN_IDENTITY (provider 'none'); the simulator attests provider 'simulator'.",
+          "required": ["provider", "model", "model_hash", "model_hash_kind",
+                       "api_version", "capabilities", "resolved_at_utc"],
+          "properties": {
+            "provider":        { "enum": ["openai-compatible-local", "anthropic-cloud", "simulator", "none"] },
+            "model":           { "type": "string" },
+            "model_hash":      { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+            "model_hash_kind": { "enum": ["weights-sha256", "identity-claim"] },
+            "api_version":     { "type": ["string", "null"] },
+            "capabilities":    { "type": "array", "items": { "enum": ["chat", "json", "tools"] } },
+            "resolved_at_utc": { "type": "string" }
           }
         }
       }
@@ -112,7 +130,7 @@
             "additionalProperties": false,
             "required": ["framework", "control", "status", "evidence"],
             "properties": {
-              "framework": { "enum": ["pci_dss_v4", "soc2", "nist_800-53"] },
+              "framework": { "enum": ["pci_dss_v4", "soc2", "nist_800-53", "eu_ai_act"] },
               "control":   { "type": "string" },
               "status":    { "enum": ["pass", "fail", "n/a"] },
               "evidence":  { "type": "string" }

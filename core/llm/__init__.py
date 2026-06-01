@@ -32,7 +32,7 @@ from .errors import (
     classify,
     is_retryable,
 )
-from .identity import resolve_model_identity, unknown_identity
+from .identity import IdentitySink, resolve_model_identity, unknown_identity
 
 __all__ = [
     # egress (CROSS-1)
@@ -70,4 +70,5 @@ __all__ = [
     # identity
     "resolve_model_identity",
     "unknown_identity",
+    "IdentitySink",
 ]

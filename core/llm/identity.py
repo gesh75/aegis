@@ -84,3 +84,26 @@ def unknown_identity(created_utc: str) -> dict[str, object]:
         "capabilities": [],
         "resolved_at_utc": created_utc,
     }
+
+
+class IdentitySink:
+    """Captures the ModelIdentity from the egress 'after_response' hook so the pipeline can
+    seal WHICH model produced a change into the evidence bundle (#4 wedge).
+
+    Wire-up:  egress.on("after_response", sink.capture)
+    Read:     sink.last  /  sink.as_bundle_dict()  -> pass to run_preflight(model_identity=...)
+    Process-local, last-write-wins (the egress makes one successful call per generate)."""
+
+    def __init__(self) -> None:
+        self._last: ModelIdentity | None = None
+
+    @property
+    def last(self) -> ModelIdentity | None:
+        return self._last
+
+    def capture(self, provider: str, identity: ModelIdentity) -> None:
+        """after_response(provider, identity) observer — never raises into the egress."""
+        self._last = identity
+
+    def as_bundle_dict(self) -> dict[str, object] | None:
+        return self._last.to_bundle_dict() if self._last is not None else None

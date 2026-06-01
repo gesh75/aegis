@@ -27,12 +27,13 @@ def verify(bundle: dict) -> bool:
 def build_bundle(*, run_id, created, operator, intent, source, configs, batfish,
                  twin, diff, compliance, tier, needs_approval, approver,
                  approval_utc, rollback_plan, decision, reason,
+                 model_identity: dict | None = None,
                  signed: bool = False) -> dict:
     severity = _severity(diff["devices_affected"],
                          len(diff["sessions_dropped"]),
                          batfish["errors"], twin["converged"])
     bundle = {
-        "bundle_version": "1.0",
+        "bundle_version": "1.1",
         "run_id": run_id,
         "created_utc": created,
         "operator": operator,
@@ -50,6 +51,8 @@ def build_bundle(*, run_id, created, operator, intent, source, configs, batfish,
                 "granted_by": approver,
                 "granted_utc": approval_utc,
             },
+            "model_identity": (model_identity if model_identity is not None
+                               else _unknown_identity()),
         },
         "twin": {
             "engine": "containerlab",
@@ -98,3 +101,22 @@ def _severity(devices, dropped, errors, converged) -> str:
     if devices >= 1:
         return "low"
     return "none"
+
+
+# Fixed timestamp for synthetic identities (UNKNOWN / simulator) so stress determinism
+# (INV-3: same intent -> identical bundle) holds. Real backends carry their own resolved_at.
+_SYNTHETIC_RESOLVED_AT = "1970-01-01T00:00:00+00:00"
+
+
+def _unknown_identity() -> dict:
+    """The honest _UNKNOWN_IDENTITY for a change no model produced (config_import /
+    operator-supplied) — keeps the v1.1 bundle schema-valid WITHOUT claiming authorship."""
+    return {
+        "provider": "none",
+        "model": "operator-supplied",
+        "model_hash": None,
+        "model_hash_kind": "identity-claim",
+        "api_version": None,
+        "capabilities": [],
+        "resolved_at_utc": _SYNTHETIC_RESOLVED_AT,
+    }

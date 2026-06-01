@@ -144,3 +144,18 @@ class SimulatorBackend:
     def teardown_twin(self, twin_id: str) -> None:
         # simulator: nothing to free. real backend: clab destroy + ns cleanup.
         return None
+
+    # --- model identity (the #4 wedge) ------------------------------------
+    def model_identity(self) -> dict:
+        """Deterministic attestation of the simulated generator. Fixed fields keep the
+        sealed bundle reproducible (stress INV-3). The real local/cloud backends attest a
+        weights-sha256 / identity-claim at the generate-path cutover."""
+        return {
+            "provider": "simulator",
+            "model": "deterministic-sim-v1",
+            "model_hash": None,
+            "model_hash_kind": "identity-claim",
+            "api_version": None,
+            "capabilities": [],
+            "resolved_at_utc": "1970-01-01T00:00:00+00:00",
+        }

@@ -26,7 +26,8 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
                   operator: str = "unknown",
                   source: str = "nl_intent",
                   approver: str | None = None,
-                  imported_configs: list[dict] | None = None) -> dict:
+                  imported_configs: list[dict] | None = None,
+                  model_identity: dict | None = None) -> dict:
     frameworks = frameworks or ["pci_dss_v4"]
     run_id = uuid.uuid4().hex
     created = datetime.now(timezone.utc).isoformat()
@@ -89,6 +90,13 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
         decision, reason = _verdict(bf, twin, tier, needs_approval,
                                     approval_granted)
 
+        # seal WHICH model produced the change (#4 wedge): nl_intent -> the backend
+        # attests its generating model; config_import (operator-supplied) -> None ->
+        # build_bundle seals the honest _UNKNOWN_IDENTITY.
+        mi = model_identity
+        if mi is None and source != "config_import" and hasattr(backend, "model_identity"):
+            mi = backend.model_identity()
+
         return build_bundle(
             run_id=run_id, created=created, operator=operator, intent=intent,
             source=source, configs=configs, batfish=bf, twin=twin, diff=diff,
@@ -96,6 +104,7 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
             approver=approver if approval_granted else None,
             approval_utc=created if approval_granted else None,
             rollback_plan=plan, decision=decision, reason=reason,
+            model_identity=mi,
         )
     finally:
         if twin_id is not None:
