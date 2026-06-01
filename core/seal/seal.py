@@ -148,3 +148,14 @@ def verify_seal(bundle: dict, seal: dict, verifier: Verifier) -> SealVerdict:
 
     return SealVerdict(True, "OK", "named+hashed model and bounded authority sealed over "
                        "this bundle; signature valid against the pinned key")
+
+
+def seal_response(bundle: dict, signer: Signer, sealed_at_utc: str) -> tuple[dict | None, str | None]:
+    """Live-path convenience: returns (receipt, None) for a bounded, integrity-valid bundle,
+    or (None, reason) when the change cannot be sealed (unbounded / tampered). The caller
+    embeds the receipt under bundle['seal'] (excluded from the bundle hash) so a run emits
+    its proof in one response."""
+    try:
+        return seal_bundle(bundle, signer, sealed_at_utc=sealed_at_utc), None
+    except SealError as exc:
+        return None, str(exc)

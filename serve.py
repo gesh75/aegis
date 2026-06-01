@@ -12,14 +12,17 @@ Live mode (real Qwen3 + containerlab twin) lives in the integrated deployment
     AEGIS_PORT=9000 python -m aegis.serve
 """
 from __future__ import annotations
+import base64
 import os
 import re
+from datetime import datetime, timezone
 
 from flask import Flask, Response, jsonify, request
 
 from aegis.core.orchestrator.pipeline import run_preflight, PreflightError
 from aegis.core.backends.simulator import SimulatorBackend
 from aegis.evidence.pdf import render_pdf
+from aegis.core.seal import Ed25519Signer, Ed25519Verifier, seal_response, verify_seal
 
 _UI = os.path.join(os.path.dirname(__file__), "ui", "preflight_screen.html")
 
@@ -40,6 +43,25 @@ _CSP = ("default-src 'self'; "
 app = Flask(__name__)
 # Reject oversized request bodies before they are parsed (sim tier has no auth).
 app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024  # 2 MB
+
+
+def _load_signer() -> Ed25519Signer:
+    """Seal signing key. AEGIS_SEAL_KEY = 64 hex chars (an Ed25519 private seed) pins a
+    stable key whose receipts verify across restarts; otherwise an EPHEMERAL demo key is
+    used. Production swaps this for a YubiKey-PIV signer (same Signer protocol)."""
+    raw = (os.environ.get("AEGIS_SEAL_KEY") or "").strip()
+    if raw:
+        try:
+            return Ed25519Signer.from_private_bytes(bytes.fromhex(raw))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[aegis.seal] AEGIS_SEAL_KEY invalid ({exc}); using an ephemeral key")
+    print("[aegis.seal] no AEGIS_SEAL_KEY set - EPHEMERAL demo signing key "
+          "(production uses a YubiKey-PIV key; receipts will not persist across restarts)")
+    return Ed25519Signer.generate()
+
+
+_SIGNER = _load_signer()
+_VERIFIER: Ed25519Verifier = _SIGNER.verifier()
 
 
 @app.after_request
@@ -94,6 +116,11 @@ def preflight_run():
         return jsonify({"error": str(e), "stage": "guard"}), 400
     except Exception as e:  # noqa: BLE001
         return jsonify({"error": f"{type(e).__name__}: {e}", "stage": "pipeline"}), 502
+    # CROSS-3: emit the bounded-autonomy seal in the same response (None if the change is
+    # not within the autonomy ceiling -- see change.authority for why). Detached: the seal
+    # rides under bundle["seal"] but is excluded from the bundle's own integrity hash.
+    seal, _skipped = seal_response(bundle, _SIGNER, datetime.now(timezone.utc).isoformat())
+    bundle["seal"] = seal
     return jsonify(bundle)
 
 
@@ -112,6 +139,24 @@ def evidence_pdf():
     run = re.sub(r"[^a-f0-9]", "", str(bundle.get("run_id", "bundle")))[:12] or "bundle"
     return Response(pdf, mimetype="application/pdf", headers={
         "Content-Disposition": f'attachment; filename="aegis-evidence-{run}.pdf"'})
+
+
+@app.get("/api/seal/pubkey")
+def seal_pubkey():
+    """The pinned public key a client uses to verify seals offline (no secret)."""
+    return jsonify({"alg": _VERIFIER.alg(), "key_id": _VERIFIER.key_id(),
+                    "public_key_b64": base64.b64encode(_SIGNER.public_key_bytes()).decode("ascii")})
+
+
+@app.post("/api/seal/verify")
+def seal_verify():
+    """Offline verification of a {bundle, seal} pair against THIS server's pinned key."""
+    data = request.get_json(silent=True) or {}
+    bundle, seal = data.get("bundle"), data.get("seal")
+    if not isinstance(bundle, dict) or not isinstance(seal, dict):
+        return jsonify({"error": "body must be {bundle, seal}"}), 400
+    v = verify_seal(bundle, seal, _VERIFIER)
+    return jsonify({"valid": v.valid, "gate": v.gate, "reason": v.reason}), (200 if v.valid else 422)
 
 
 def main():

@@ -17,6 +17,8 @@ def compute_sha256(bundle: dict) -> str:
     """Hash of the bundle with integrity.sha256 emptied (stable, verifiable)."""
     clone = json.loads(json.dumps(bundle))
     clone["integrity"]["sha256"] = ""
+    clone.pop("seal", None)  # a detached CROSS-3 seal may ride in the response but is NOT
+                             # part of the bundle's own integrity hash (it signs that hash)
     return hashlib.sha256(_canonical(clone)).hexdigest()
 
 

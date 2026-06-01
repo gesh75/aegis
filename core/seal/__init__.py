@@ -10,6 +10,7 @@ from .seal import (
     build_claims,
     canonical_claims_bytes,
     seal_bundle,
+    seal_response,
     verify_seal,
 )
 from .signing import Ed25519Signer, Ed25519Verifier, Signer, Verifier, key_id
@@ -21,6 +22,7 @@ __all__ = [
     "build_claims",
     "canonical_claims_bytes",
     "seal_bundle",
+    "seal_response",
     "verify_seal",
     "Signer",
     "Verifier",

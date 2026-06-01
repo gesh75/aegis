@@ -22,9 +22,10 @@ from aegis.core.seal import (
     build_claims,
     canonical_claims_bytes,
     seal_bundle,
+    seal_response,
     verify_seal,
 )
-from aegis.evidence.bundler import compute_sha256
+from aegis.evidence.bundler import compute_sha256, verify
 
 try:
     import jsonschema
@@ -206,6 +207,31 @@ def test_seal_matches_schema() -> None:
     b = _bounded_bundle()
     s = Ed25519Signer.generate()
     jsonschema.validate(seal_bundle(b, s, sealed_at_utc=_AT), _seal_schema())
+
+
+# ── live-path wiring: seal_response + embedded-seal hash exclusion ────────────────
+
+def test_seal_response_bounded_returns_receipt() -> None:
+    b = _bounded_bundle(); s = Ed25519Signer.generate()
+    seal, reason = seal_response(b, s, _AT)
+    assert reason is None and seal is not None
+    assert verify_seal(b, seal, s.verifier()).valid
+
+
+def test_seal_response_unbounded_returns_reason() -> None:
+    b = _unbounded_bundle(); s = Ed25519Signer.generate()
+    seal, reason = seal_response(b, s, _AT)
+    assert seal is None and reason and "ceiling" in reason.lower()
+
+
+def test_compute_sha256_excludes_embedded_seal() -> None:
+    """A detached seal embedded under bundle['seal'] (the live-path response shape) must NOT
+    change the bundle's own integrity hash, so verify(bundle) still holds."""
+    b = _bounded_bundle(); s = Ed25519Signer.generate()
+    seal, _ = seal_response(b, s, _AT)
+    b["seal"] = seal
+    assert verify(b), "embedded seal must be excluded from the bundle integrity hash"
+    assert verify_seal(b, b["seal"], s.verifier()).valid
 
 
 # ── runner ───────────────────────────────────────────────────────────────────────
