@@ -53,7 +53,7 @@
           "required": ["provider", "model", "model_hash", "model_hash_kind",
                        "api_version", "capabilities", "resolved_at_utc"],
           "properties": {
-            "provider":        { "enum": ["openai-compatible-local", "anthropic-cloud", "simulator", "none"] },
+            "provider":        { "enum": ["openai-compatible-local", "anthropic-cloud", "simulator", "none", "unknown"] },
             "model":           { "type": "string" },
             "model_hash":      { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
             "model_hash_kind": { "enum": ["weights-sha256", "identity-claim"] },

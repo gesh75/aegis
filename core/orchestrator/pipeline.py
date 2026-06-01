@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 from ..backends.base import Backend, GeneratedConfig
 from . import guards, rollback
-from ...evidence.bundler import build_bundle
+from ...evidence.bundler import build_bundle, unattested_identity
 from ...evidence.compliance import map_controls
 
 
@@ -90,12 +90,18 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
         decision, reason = _verdict(bf, twin, tier, needs_approval,
                                     approval_granted)
 
-        # seal WHICH model produced the change (#4 wedge): nl_intent -> the backend
-        # attests its generating model; config_import (operator-supplied) -> None ->
-        # build_bundle seals the honest _UNKNOWN_IDENTITY.
-        mi = model_identity
-        if mi is None and source != "config_import" and hasattr(backend, "model_identity"):
-            mi = backend.model_identity()
+        # seal WHICH model produced the change (#4 wedge). config_import is operator-
+        # supplied (no model) -> None -> build_bundle seals the honest _UNKNOWN_IDENTITY.
+        # nl_intent ALWAYS went through a model (generate_config), so the backend MUST
+        # attest which; if it cannot, seal an explicit UNATTESTED marker -- NEVER the
+        # operator-supplied identity (that would falsely deny model authorship).
+        if model_identity is not None:
+            mi = model_identity
+        elif source == "config_import":
+            mi = None
+        else:
+            attested = backend.model_identity() if hasattr(backend, "model_identity") else None
+            mi = attested if attested is not None else unattested_identity()
 
         return build_bundle(
             run_id=run_id, created=created, operator=operator, intent=intent,

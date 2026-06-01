@@ -172,6 +172,35 @@ def test_egress_after_response_sink_into_sealed_bundle() -> None:
     _validate(b)
 
 
+class _NoAttestBackend:
+    """A generating backend (nl_intent) that does NOT attest a model identity --
+    e.g. the live HttpBackend before the generate-path cutover."""
+    def __init__(self) -> None:
+        self._inner = SimulatorBackend()
+    def generate_config(self, intent, lab):
+        return self._inner.generate_config(intent, lab)
+    def batfish_check(self, configs):
+        return self._inner.batfish_check(configs)
+    def spawn_twin(self, lab):
+        return self._inner.spawn_twin(lab)
+    def apply_and_converge(self, twin_id, configs):
+        return self._inner.apply_and_converge(twin_id, configs)
+    def state_diff(self, twin_id):
+        return self._inner.state_diff(twin_id)
+    def teardown_twin(self, twin_id):
+        return self._inner.teardown_twin(twin_id)
+
+
+def test_nl_intent_without_attestation_is_unattested_not_operator() -> None:
+    b = run_preflight(_INTENT, backend=_NoAttestBackend(), lab="clos-evpn")
+    mi = b["change"]["model_identity"]
+    assert mi["provider"] == "unknown" and mi["model"] == "unattested"
+    # MUST NOT be confused with a config_import operator-supplied identity:
+    assert (mi["provider"], mi["model"]) != ("none", "operator-supplied")
+    assert verify(b)
+    _validate(b)
+
+
 def test_empty_sink_yields_none() -> None:
     assert IdentitySink().as_bundle_dict() is None
 

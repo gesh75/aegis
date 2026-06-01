@@ -120,3 +120,19 @@ def _unknown_identity() -> dict:
         "capabilities": [],
         "resolved_at_utc": _SYNTHETIC_RESOLVED_AT,
     }
+
+
+def unattested_identity() -> dict:
+    """A model DID produce this change (nl_intent) but the backend could not attest WHICH.
+    Deliberately DISTINCT from _unknown_identity (operator-supplied) so a missing
+    attestation can NEVER be read as 'no model was involved' (that would falsely deny AI
+    authorship). provider 'unknown' + model 'unattested' make the gap auditable."""
+    return {
+        "provider": "unknown",
+        "model": "unattested",
+        "model_hash": None,
+        "model_hash_kind": "identity-claim",
+        "api_version": None,
+        "capabilities": [],
+        "resolved_at_utc": _SYNTHETIC_RESOLVED_AT,
+    }

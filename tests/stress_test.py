@@ -77,6 +77,8 @@ class CountingBackend:
     def teardown_twin(self, twin_id):
         self.torn += 1
         return self.inner.teardown_twin(twin_id)
+    def model_identity(self):
+        return self.inner.model_identity()
 
 
 def _random_intent(rng: random.Random) -> str:
