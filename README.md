@@ -2,6 +2,13 @@
 
 # AEGIS
 
+## 📖 Live documentation
+
+[![AEGIS — live documentation](docs/assets/preview.png)](https://gesh75.github.io/aegis/)
+
+> 🌐 **Live:** <https://gesh75.github.io/aegis/> — an animated single-page guide: architecture diagrams, data flow, tech stack, and quickstart.
+
+
 > **Air-gapped Evidence-Grade Inspection System** — preflight network changes against a
 > *real* digital twin, entirely inside your perimeter. No cloud. No data egress. Ever.
 
