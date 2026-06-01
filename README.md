@@ -7,6 +7,8 @@
 [![AEGIS — live documentation](docs/assets/preview.png)](https://gesh75.github.io/aegis/)
 
 > 🌐 **Live:** <https://gesh75.github.io/aegis/> — an animated single-page guide: architecture diagrams, data flow, tech stack, and quickstart.
+>
+> 🗂️ Part of the **[gesh75 documentation hub](https://gesh75.github.io/)** — all my network & AI engineering project docs in one place.
 
 
 > **Air-gapped Evidence-Grade Inspection System** — preflight network changes against a
