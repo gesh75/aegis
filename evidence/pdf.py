@@ -164,5 +164,21 @@ def render_pdf(bundle: dict) -> bytes:
         f"{ig.get('signed', False)}", ss["AegisSub"]))
     el.append(Paragraph(f"sha256 {ig['sha256']}", ss["AegisMono"]))
 
+    # bounded-autonomy seal (CROSS-3) — the offline-verifiable receipt, when present
+    seal = bundle.get("seal")
+    if seal:
+        cl = seal.get("claims", {}); m = cl.get("model", {}); au = cl.get("authority", {})
+        sig = seal.get("signature", {})
+        el.append(Spacer(1, 6))
+        el.append(Paragraph("<b>Bounded-autonomy seal</b> &nbsp; (offline-verifiable receipt)",
+                            ss["AegisSub"]))
+        el.append(_kv_table([
+            ["Model", f"{m.get('provider','?')} · {m.get('model','?')} "
+             f"({m.get('model_hash_kind','?')})"],
+            ["Authority", f"required {au.get('required','?')} · ceiling "
+             f"{au.get('max_authorized','?')} · {'within bound' if au.get('allowed') else 'EXCEEDS'}"],
+            ["Signature", f"{sig.get('alg','?')} · key {sig.get('key_id','?')}"],
+        ]))
+
     doc.build(el)
     return buf.getvalue()

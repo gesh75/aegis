@@ -111,12 +111,34 @@ def main() -> int:
     check("bundle.egress_none", (bundle.get("integrity") or {}).get("egress") == "none",
           str((bundle.get("integrity") or {}).get("egress")))
 
+    # 13 — CROSS-3 seal emitted in the run response (bounded change -> receipt; else null)
+    au = (bundle.get("change") or {}).get("authority") or {}
+    seal = bundle.get("seal")
+    if au.get("allowed") and au.get("effective") != "block":
+        check("run.seal.present", isinstance(seal, dict) and "signature" in seal,
+              "expected a seal receipt for a bounded change")
+    else:
+        check("run.seal.absent_when_unbounded", seal is None, "unbounded change must not seal")
+
+    # 14 — pinned public key published for offline verification
+    r = c.get("/api/seal/pubkey")
+    pk = r.get_json() if r.status_code == 200 else {}
+    check("seal.pubkey.200", r.status_code == 200, str(r.status_code))
+    check("seal.pubkey.keyid", bool(pk.get("key_id")) and pk.get("alg") == "ed25519", str(pk)[:80])
+
+    # 15 — offline verify endpoint accepts a genuine {bundle, seal} pair
+    if isinstance(seal, dict):
+        r = c.post("/api/seal/verify", json={"bundle": bundle, "seal": seal})
+        vd = r.get_json() if r.status_code == 200 else {}
+        check("seal.verify.valid", r.status_code == 200 and vd.get("valid") is True,
+              f"{r.status_code} {r.get_data(as_text=True)[:120]}")
+
     if FAILS:
         print("\n=== API ENDPOINT TEST: FAIL ===")
         for f in FAILS:
             print("  -", f)
         return 1
-    print(f"\n=== API ENDPOINT TEST: PASS ({CHECKS} checks across 5 routes) ===")
+    print(f"\n=== API ENDPOINT TEST: PASS ({CHECKS} checks across 7 routes) ===")
     return 0
 
 

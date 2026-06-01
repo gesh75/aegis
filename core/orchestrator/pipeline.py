@@ -13,7 +13,8 @@ from datetime import datetime, timezone
 
 from ..backends.base import Backend, GeneratedConfig
 from . import guards, rollback
-from ...evidence.bundler import build_bundle
+from ...evidence.bundler import build_bundle, unattested_identity
+from ..risk import authority_record, classify_change, load_max_authorized, unify_severity
 from ...evidence.compliance import map_controls
 
 
@@ -26,7 +27,8 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
                   operator: str = "unknown",
                   source: str = "nl_intent",
                   approver: str | None = None,
-                  imported_configs: list[dict] | None = None) -> dict:
+                  imported_configs: list[dict] | None = None,
+                  model_identity: dict | None = None) -> dict:
     frameworks = frameworks or ["pci_dss_v4"]
     run_id = uuid.uuid4().hex
     created = datetime.now(timezone.utc).isoformat()
@@ -89,6 +91,30 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
         decision, reason = _verdict(bf, twin, tier, needs_approval,
                                     approval_granted)
 
+        # seal WHICH model produced the change (#4 wedge). config_import is operator-
+        # supplied (no model) -> None -> build_bundle seals the honest _UNKNOWN_IDENTITY.
+        # nl_intent ALWAYS went through a model (generate_config), so the backend MUST
+        # attest which; if it cannot, seal an explicit UNATTESTED marker -- NEVER the
+        # operator-supplied identity (that would falsely deny model authorship).
+        if model_identity is not None:
+            mi = model_identity
+        elif source == "config_import":
+            mi = None
+        else:
+            attested = backend.model_identity() if hasattr(backend, "model_identity") else None
+            mi = attested if attested is not None else unattested_identity()
+
+        # authority tier (#5): orthogonal to risk_tier -- a twin-clean LOW-severity change
+        # to a fabric-identity construct (AS/RD/RT) is still BLOCK. Sealed + enforced at G5.
+        authority = authority_record(
+            unify_severity(batfish_errors=bf["errors"],
+                           devices_affected=diff["devices_affected"],
+                           sessions_dropped=len(diff["sessions_dropped"]),
+                           converged=twin["converged"]),
+            classify_change(configs),
+            load_max_authorized(),
+        )
+
         return build_bundle(
             run_id=run_id, created=created, operator=operator, intent=intent,
             source=source, configs=configs, batfish=bf, twin=twin, diff=diff,
@@ -96,6 +122,7 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
             approver=approver if approval_granted else None,
             approval_utc=created if approval_granted else None,
             rollback_plan=plan, decision=decision, reason=reason,
+            model_identity=mi, authority=authority,
         )
     finally:
         if twin_id is not None:
