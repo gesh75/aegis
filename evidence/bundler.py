@@ -28,12 +28,13 @@ def build_bundle(*, run_id, created, operator, intent, source, configs, batfish,
                  twin, diff, compliance, tier, needs_approval, approver,
                  approval_utc, rollback_plan, decision, reason,
                  model_identity: dict | None = None,
+                 authority: dict | None = None,
                  signed: bool = False) -> dict:
     severity = _severity(diff["devices_affected"],
                          len(diff["sessions_dropped"]),
                          batfish["errors"], twin["converged"])
     bundle = {
-        "bundle_version": "1.1",
+        "bundle_version": "1.2",
         "run_id": run_id,
         "created_utc": created,
         "operator": operator,
@@ -53,6 +54,8 @@ def build_bundle(*, run_id, created, operator, intent, source, configs, batfish,
             },
             "model_identity": (model_identity if model_identity is not None
                                else _unknown_identity()),
+            "authority": (authority if authority is not None
+                          else _failclosed_authority(severity)),
         },
         "twin": {
             "engine": "containerlab",
@@ -135,4 +138,19 @@ def unattested_identity() -> dict:
         "api_version": None,
         "capabilities": [],
         "resolved_at_utc": _SYNTHETIC_RESOLVED_AT,
+    }
+
+
+def _failclosed_authority(severity: str) -> dict:
+    """Fallback when no authority was computed (a direct build_bundle call). Fail CLOSED:
+    an unknown authority is BLOCK, so it can never be promoted. run_preflight always
+    supplies a real record (core.risk.authority_record)."""
+    return {
+        "severity": severity,
+        "required": "block",
+        "max_authorized": "auto",
+        "allowed": False,
+        "effective": "block",
+        "change_class": {"touches_asn": False, "touches_rd_rt": False,
+                         "touches_spine": False, "touches_underlay": False},
     }

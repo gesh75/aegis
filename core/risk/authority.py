@@ -23,6 +23,7 @@ The richer engine wins; tests/authority_test.py carries the differential vs both
 """
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from enum import IntEnum
@@ -169,3 +170,51 @@ def authorize(required: Tier, max_authorized: Tier) -> AuthorityDecision:
                   f"{max_authorized.name} -> BLOCK")
     return AuthorityDecision(required=required, max_authorized=max_authorized,
                              allowed=allowed, effective=effective, reason=reason)
+
+
+_DEFAULT_MAX_AUTHORIZED = Tier.HOTL
+
+
+def load_max_authorized() -> Tier:
+    """The deployment's autonomy ceiling. Env AEGIS_MAX_AUTHORIZED_TIER (AUTO|HITL|HOTL),
+    default HOTL. BLOCK is rejected as a ceiling (it would authorize fabric-identity /
+    critical changes). An invalid value RAISES (fail-closed, loud) rather than silently
+    defaulting to something permissive.
+
+    NOTE: env-configured today. The CROSS-3 follow-up binds it to a hardware-PIV signature +
+    compiled-in public key so it cannot be raised by editing the environment — the
+    tamper-proofing the no-self-escalation invariant ultimately needs. This ships the
+    deterministic enforcement that signature will protect."""
+    raw = os.environ.get("AEGIS_MAX_AUTHORIZED_TIER")
+    if not raw:
+        return _DEFAULT_MAX_AUTHORIZED
+    try:
+        tier = Tier[raw.strip().upper()]
+    except KeyError:
+        raise ValueError(f"AEGIS_MAX_AUTHORIZED_TIER must be one of AUTO|HITL|HOTL (got {raw!r})")
+    if tier == Tier.BLOCK:
+        raise ValueError("AEGIS_MAX_AUTHORIZED_TIER=BLOCK is invalid — a ceiling cannot "
+                         "authorize BLOCK-tier (fabric-identity / critical) changes")
+    return tier
+
+
+def authority_record(severity: Severity, change_class: ChangeClass,
+                     max_authorized: Tier) -> dict:
+    """The sealed change.authority object: severity (how bad if it fails) + the required
+    authority (how much autonomy), the ceiling it was checked against, and the
+    no-self-escalation decision. Lowercase strings to match the bundle vocabulary."""
+    required = required_authority(severity, change_class)
+    decision = authorize(required, max_authorized)
+    return {
+        "severity": severity.name.lower(),
+        "required": required.name.lower(),
+        "max_authorized": max_authorized.name.lower(),
+        "allowed": decision.allowed,
+        "effective": decision.effective.name.lower(),
+        "change_class": {
+            "touches_asn": change_class.touches_asn,
+            "touches_rd_rt": change_class.touches_rd_rt,
+            "touches_spine": change_class.touches_spine,
+            "touches_underlay": change_class.touches_underlay,
+        },
+    }

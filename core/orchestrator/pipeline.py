@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from ..backends.base import Backend, GeneratedConfig
 from . import guards, rollback
 from ...evidence.bundler import build_bundle, unattested_identity
+from ..risk import authority_record, classify_change, load_max_authorized, unify_severity
 from ...evidence.compliance import map_controls
 
 
@@ -103,6 +104,17 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
             attested = backend.model_identity() if hasattr(backend, "model_identity") else None
             mi = attested if attested is not None else unattested_identity()
 
+        # authority tier (#5): orthogonal to risk_tier -- a twin-clean LOW-severity change
+        # to a fabric-identity construct (AS/RD/RT) is still BLOCK. Sealed + enforced at G5.
+        authority = authority_record(
+            unify_severity(batfish_errors=bf["errors"],
+                           devices_affected=diff["devices_affected"],
+                           sessions_dropped=len(diff["sessions_dropped"]),
+                           converged=twin["converged"]),
+            classify_change(configs),
+            load_max_authorized(),
+        )
+
         return build_bundle(
             run_id=run_id, created=created, operator=operator, intent=intent,
             source=source, configs=configs, batfish=bf, twin=twin, diff=diff,
@@ -110,7 +122,7 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
             approver=approver if approval_granted else None,
             approval_utc=created if approval_granted else None,
             rollback_plan=plan, decision=decision, reason=reason,
-            model_identity=mi,
+            model_identity=mi, authority=authority,
         )
     finally:
         if twin_id is not None:

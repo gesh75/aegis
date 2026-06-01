@@ -7,8 +7,10 @@ from .authority import (
     ChangeClass,
     Severity,
     Tier,
+    authority_record,
     authorize,
     classify_change,
+    load_max_authorized,
     required_authority,
     unify_severity,
 )
@@ -22,4 +24,6 @@ __all__ = [
     "unify_severity",
     "required_authority",
     "authorize",
+    "load_max_authorized",
+    "authority_record",
 ]
