@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://aegis.local/schema/seal.schema.json",
+  "title": "AEGIS CROSS-3 Bounded-Autonomy Seal (detached receipt)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["seal_version", "claims", "signature"],
+  "properties": {
+    "seal_version": { "const": "1.0" },
+    "claims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seal_version", "bundle_sha256", "model", "authority", "sealed_at_utc"],
+      "properties": {
+        "seal_version":  { "const": "1.0" },
+        "bundle_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "model": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["provider", "model", "model_hash", "model_hash_kind"],
+          "properties": {
+            "provider":        { "type": "string" },
+            "model":           { "type": "string" },
+            "model_hash":      { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+            "model_hash_kind": { "enum": ["weights-sha256", "identity-claim"] }
+          }
+        },
+        "authority": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["required", "max_authorized", "allowed", "effective"],
+          "properties": {
+            "required":       { "enum": ["auto", "hitl", "hotl", "block"] },
+            "max_authorized": { "enum": ["auto", "hitl", "hotl", "block"] },
+            "allowed":        { "type": "boolean" },
+            "effective":      { "enum": ["auto", "hitl", "hotl", "block"] }
+          }
+        },
+        "sealed_at_utc": { "type": "string" }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alg", "key_id", "value"],
+      "properties": {
+        "alg":    { "enum": ["ed25519", "piv-ecdsa-p256"] },
+        "key_id": { "type": "string" },
+        "value":  { "type": "string" }
+      }
+    }
+  }
+}

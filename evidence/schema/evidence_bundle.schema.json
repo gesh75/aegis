@@ -7,7 +7,7 @@
   "required": ["bundle_version", "run_id", "created_utc", "change", "twin",
                "validation", "verdict", "integrity"],
   "properties": {
-    "bundle_version": { "const": "1.0" },
+    "bundle_version": { "const": "1.2" },
     "run_id":         { "type": "string", "minLength": 8 },
     "created_utc":    { "type": "string", "format": "date-time" },
     "operator":       { "type": "string" },
@@ -15,7 +15,8 @@
     "change": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["intent", "source", "generated_configs", "risk_tier", "approval"],
+      "required": ["intent", "source", "generated_configs", "risk_tier", "approval",
+                   "model_identity", "authority"],
       "properties": {
         "intent": { "type": "string" },
         "source": { "enum": ["nl_intent", "config_import"] },
@@ -42,6 +43,48 @@
             "required":    { "type": "boolean" },
             "granted_by":  { "type": ["string", "null"] },
             "granted_utc": { "type": ["string", "null"], "format": "date-time" }
+          }
+        },
+
+        "model_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The proposing model, sealed into the bundle SHA-256 (the #4 wedge). LOCAL backends carry a real weights-sha256; CLOUD backends an honest identity-claim (model_hash=null); a missing attestation seals provider 'unknown'/'unattested'; config_import seals 'none'/'operator-supplied'.",
+          "required": ["provider", "model", "model_hash", "model_hash_kind",
+                       "api_version", "capabilities", "resolved_at_utc"],
+          "properties": {
+            "provider":        { "enum": ["openai-compatible-local", "anthropic-cloud", "simulator", "none", "unknown"] },
+            "model":           { "type": "string" },
+            "model_hash":      { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+            "model_hash_kind": { "enum": ["weights-sha256", "identity-claim"] },
+            "api_version":     { "type": ["string", "null"] },
+            "capabilities":    { "type": "array", "items": { "enum": ["chat", "json", "tools"] } },
+            "resolved_at_utc": { "type": "string" }
+          }
+        },
+
+        "authority": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The orthogonal authority axis (#5): severity = how bad if it fails; required/effective = how much autonomy is allowed (auto<hitl<hotl<block). A fabric-identity (AS/RD/RT) or critical change is forced to block regardless of severity. 'allowed' is the no-self-escalation decision (required <= max_authorized). Sealed into the bundle hash; re-derived + enforced at gate rule G5.",
+          "required": ["severity", "required", "max_authorized", "allowed", "effective", "change_class"],
+          "properties": {
+            "severity":       { "enum": ["none", "low", "medium", "high", "critical"] },
+            "required":       { "enum": ["auto", "hitl", "hotl", "block"] },
+            "max_authorized": { "enum": ["auto", "hitl", "hotl", "block"] },
+            "allowed":        { "type": "boolean" },
+            "effective":      { "enum": ["auto", "hitl", "hotl", "block"] },
+            "change_class": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["touches_asn", "touches_rd_rt", "touches_spine", "touches_underlay"],
+              "properties": {
+                "touches_asn":      { "type": "boolean" },
+                "touches_rd_rt":    { "type": "boolean" },
+                "touches_spine":    { "type": "boolean" },
+                "touches_underlay": { "type": "boolean" }
+              }
+            }
           }
         }
       }
@@ -112,7 +155,7 @@
             "additionalProperties": false,
             "required": ["framework", "control", "status", "evidence"],
             "properties": {
-              "framework": { "enum": ["pci_dss_v4", "soc2", "nist_800-53"] },
+              "framework": { "enum": ["pci_dss_v4", "soc2", "nist_800-53", "eu_ai_act"] },
               "control":   { "type": "string" },
               "status":    { "enum": ["pass", "fail", "n/a"] },
               "evidence":  { "type": "string" }
