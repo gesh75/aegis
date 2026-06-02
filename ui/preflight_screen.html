@@ -3,8 +3,12 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:5757; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"/>
+<!-- frame-ancestors is delivered via the HTTP response header (it is ignored in a <meta> tag);
+     keeping it out of here avoids a benign console error while the header still enforces it. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:5757; img-src 'self' data:; base-uri 'none'; form-action 'self'"/>
 <title>AEGIS · PreFlight</title>
+<!-- inline data-URI favicon avoids a /favicon.ico 404 in the console (no external asset) -->
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>"/>
 <style>
   :root{
     --bg:#0b0f17; --panel:#121826; --panel2:#0e1422; --line:#1f2a3d;
@@ -91,7 +95,7 @@
       <option value="minimal">minimal</option>
       <option value="3tier">3tier</option>
     </select>
-    <select id="mode">
+    <select id="mode" onchange="modeHint()" title="sim = offline demo (zero deps) · live = operator/air-gapped path (needs API key + self-hosted LLM + containerlab)">
       <option value="sim">sim</option>
       <option value="live">live</option>
     </select>
@@ -141,6 +145,13 @@ function toggleSource(){
   if(gen) gen.style.opacity=cfg?'0.35':'';
 }
 
+function modeHint(){
+  const live=document.getElementById('mode').value==='live';
+  document.getElementById('foot').textContent = live
+    ? 'live = operator / air-gapped path — needs an API key + self-hosted LLM + containerlab. For a zero-deps run, use sim.'
+    : '';
+}
+
 async function runPreflight(){
   const btn=document.getElementById('go'); btn.disabled=true;
   setSteps(true);
@@ -170,6 +181,30 @@ async function runPreflight(){
 }
 
 function render_err(d){
+  // Live mode is the operator / air-gapped path: it spawns a containerlab twin and
+  // calls a self-hosted LLM, so the same-origin browser demo can't drive it (no API
+  // key, and the host needs the model + clab). Rather than dead-end on a bare
+  // "unauthorized", explain it and point at the sim demo that runs the full loop here.
+  const liveGated = d.mode==='live' &&
+    /unauthorized|not configured|not available|guard/i.test((d.error||'')+' '+(d.stage||''));
+  if(liveGated){
+    document.getElementById('c-verdict').innerHTML=
+      '<h3>Verdict</h3>'+
+      '<div class="muted" style="font-size:15px;line-height:1.5">'+
+      '<b style="color:var(--ink)">Live mode is operator-only.</b><br>'+
+      'It clones a <b>containerlab</b> digital twin and calls a <b>self-hosted LLM</b>, so it needs '+
+      'an operator API key plus the model + containerlab on the host — not the browser demo.</div>'+
+      '<div class="kv"><span>this run</span><b>'+h(d.error||'gated')+'</b></div>'+
+      '<div class="kv"><span>fix</span><b>switch mode → <span style="color:var(--acc)">sim</span></b></div>';
+    const note={'c-twin':'Digital twin','c-config':'Generated config (grounded)',
+                'c-evidence':'Evidence &amp; compliance'};
+    for(const id in note)
+      document.getElementById(id).innerHTML='<h3>'+note[id]+
+        '</h3><div class="muted">— sim mode runs the full pipeline offline, right here</div>';
+    document.getElementById('foot').textContent=
+      'live = air-gapped operator path · the open demo is sim (zero deps, nothing leaves the box)';
+    return;
+  }
   document.getElementById('c-verdict').innerHTML=
     '<h3>Verdict</h3><div class="err">✕ '+h(d.error||'request failed')+
     '</div><div class="muted">stage: '+h(d.stage||'?')+
