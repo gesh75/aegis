@@ -119,7 +119,9 @@ def render_pdf(bundle: dict) -> bytes:
         ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
     ]
     for i, c in enumerate(bundle["validation"]["compliance"], start=1):
-        col = colors.HexColor("#c0392b") if c["status"] == "fail" else colors.HexColor("#1f8f4e")
+        col = (colors.HexColor("#c0392b") if c["status"] == "fail"
+               else colors.HexColor("#b8860b") if c["status"] == "not_applicable"
+               else colors.HexColor("#1f8f4e"))
         cstyle.append(("TEXTCOLOR", (2, i), (2, i), col))
         cstyle.append(("FONTNAME", (2, i), (2, i), "Helvetica-Bold"))
     ct.setStyle(TableStyle(cstyle))

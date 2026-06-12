@@ -59,6 +59,7 @@
         margin:3px 4px 0 0;border:1px solid var(--line)}
   .chip.pass{color:var(--ok);border-color:#1f5d3a;background:#0f1f17}
   .chip.fail{color:var(--bad);border-color:#5d2222;background:#1f0f0f}
+  .chip.na{color:var(--mut);border-color:#3a3f4d;background:#161b27}
   .dev{font:12px var(--mono);color:var(--mut);margin-top:4px}
   .foot{margin-top:18px;font:11px var(--mono);color:var(--mut);
         border-top:1px solid var(--line);padding-top:10px;word-break:break-all}
@@ -161,7 +162,7 @@ async function runPreflight(){
     source:source,
     lab:document.getElementById('lab').value,
     mode:document.getElementById('mode').value,
-    frameworks:["pci_dss_v4","soc2","nist_800-53"],
+    frameworks:["pci_dss_v4","disa_stig","cis_v8","nist_csf_2.0","nerc_cip","hipaa","iso_27001"],
     approver:"noc-lead"
   };
   if(source==='config_import'){
@@ -274,9 +275,11 @@ function render(b){
     '<div class="kv"><span>batfish</span><b>'+h(bf.errors)+' err · '+h(bf.warnings)+
       ' warn · '+h(bf.passed)+' pass</b></div>'+
     '<div style="margin:8px 0">'+
-      b.validation.compliance.map(x=>'<span class="chip '+
-        (x.status==='fail'?'fail':'pass')+'">'+h(x.framework)+' '+h(x.control)+
-        ' · '+h(x.status)+'</span>').join('')+'</div>'+
+      b.validation.compliance.map(x=>{
+        const cls=x.status==='fail'?'fail':x.status==='not_applicable'?'na':'pass';
+        const lbl=x.status==='not_applicable'?'n/a':x.status;
+        return '<span class="chip '+cls+'">'+h(x.framework)+' '+h(x.control)+
+          ' · '+h(lbl)+'</span>';}).join('')+'</div>'+
     (bf.findings.length?'<pre>'+h(bf.findings.join('\n'))+'</pre>':'')+
     '<div class="dev">rollback steps: '+h(b.rollback.plan.length)+
       ' · tested in twin: '+(b.rollback.tested_in_twin?'yes':'no')+'</div>'+

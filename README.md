@@ -30,10 +30,14 @@ examiner-ready evidence bundle.
 
 ## Demo
 
-[![AEGIS PreFlight — 64-second overview](docs/video_poster.png)](docs/overview_video.mp4)
+[![AEGIS PreFlight — full feature tour](docs/video_poster.png)](docs/aegis_feature_tour_andrew.mp4)
 
-▶ **[Watch the 64-second overview](docs/overview_video.mp4)** (silent, captioned) ·
-**[narrated 2-minute cut](docs/overview_video_narrated.mp4)**
+▶ **[Watch the 3-minute feature tour](docs/aegis_feature_tour_andrew.mp4)** (narrated) — every stage
+on the live PreFlight UI: intent → digital twin → grounded config → PCI/SOC 2/NIST → sealed evidence →
+offline Ed25519 verify → the **BLOCKED** guardrail → config-import → live mode.
+
+Shorter cuts: **[64-second overview](docs/overview_video.mp4)** (silent, captioned) ·
+**[narrated overview](docs/overview_video_narrated.mp4)** · **[real-product demo](docs/demo_video_narrated.mp4)**
 
 <!-- INLINE PLAYER (optional, after first push): create a GitHub Release, drag
      docs/overview_video.mp4 into it, copy the https://github.com/gesh75/aegis/assets/…

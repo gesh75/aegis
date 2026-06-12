@@ -155,10 +155,11 @@
             "additionalProperties": false,
             "required": ["framework", "control", "status", "evidence"],
             "properties": {
-              "framework": { "enum": ["pci_dss_v4", "soc2", "nist_800-53", "eu_ai_act"] },
+              "framework": { "type": "string", "minLength": 1 },
               "control":   { "type": "string" },
-              "status":    { "enum": ["pass", "fail", "n/a"] },
-              "evidence":  { "type": "string" }
+              "status":    { "enum": ["pass", "fail", "not_applicable", "n/a"] },
+              "evidence":  { "type": "string" },
+              "kind":      { "enum": ["config-checked", "process-mapped"] }
             }
           }
         }

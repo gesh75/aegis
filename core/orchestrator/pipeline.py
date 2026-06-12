@@ -72,7 +72,8 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
         diff = backend.state_diff(twin_id)
 
         # 7. compliance mapping -------------------------------------------
-        compliance = map_controls(configs, bf, frameworks)
+        compliance = map_controls(configs, bf, frameworks, twin=twin, diff=diff,
+                                  intent=intent or "", source=source)
 
         # 8. risk tier ----------------------------------------------------
         tier = guards.risk_tier(

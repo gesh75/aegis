@@ -1,48 +1,36 @@
 """Map a verified change -> control hits across frameworks.
 
-Tiny, deterministic crosswalk. Production loads evidence/mappings/*.yaml; here we
-inline the handful of controls the proof screen needs so the package runs dep-free.
+Deterministic crosswalk. Each framework is a self-contained module under
+`evidence/frameworks/` that the registry auto-discovers; this file just builds the shared
+`ComplianceSignal` and dispatches the requested frameworks through it, preserving the
+caller's framework order.
+
+Adding a framework = one new file in `frameworks/` (no edit here). See
+`frameworks/_base.py` for the module contract and the honesty rule (config-checked vs
+process-mapped controls; never claim "certified").
 """
 from __future__ import annotations
 from ..core.backends.base import GeneratedConfig, BatfishResult
-
-
-# control -> (framework, what the check proves)
-_RULES = {
-    "pci_dss_v4": [
-        ("1.2.1", "config-derived: BGP neighbors carry an export/import policy"),
-        ("8.3.1", "config-derived: no plaintext authentication material"),
-    ],
-    "soc2": [
-        ("CC8.1", "change went through verified preflight before deployment"),
-    ],
-    "nist_800-53": [
-        ("CM-3", "change verified in digital twin prior to production"),
-        ("CM-6", "config baseline enforced (no insecure directives)"),
-    ],
-}
+from .frameworks import REGISTRY
+from .frameworks._base import ComplianceSignal
 
 
 def map_controls(configs: list[GeneratedConfig], bf: BatfishResult,
-                 frameworks: list[str]) -> list[dict]:
-    out: list[dict] = []
-    has_plaintext = any("plaintext" in c["config"].lower()
-                        or "abc123" in c["config"].lower() for c in configs)
-    missing_policy = any("without export policy" in f for f in bf["findings"])
+                 frameworks: list[str], twin: dict | None = None,
+                 diff: dict | None = None, intent: str = "",
+                 source: str = "nl_intent") -> list[dict]:
+    """Evaluate each requested framework against the change.
 
+    Back-compatible: callers passing only (configs, bf, frameworks) still work; the twin/
+    diff/intent/source signals let framework modules make richer, honest assertions.
+    Unknown framework ids are skipped silently (the UI may offer more than is installed).
+    """
+    sig = ComplianceSignal(configs=configs, batfish=bf, twin=twin, diff=diff,
+                           intent=intent, source=source)
+    out: list[dict] = []
     for fw in frameworks:
-        for control, desc in _RULES.get(fw, []):
-            if control == "8.3.1":
-                status = "fail" if has_plaintext else "pass"
-                ev = ("plaintext auth-key present" if has_plaintext
-                      else "no plaintext secrets in generated config")
-            elif control == "1.2.1":
-                status = "fail" if missing_policy else "pass"
-                ev = ("BGP neighbor missing export policy" if missing_policy
-                      else "export policy present on BGP neighbors")
-            else:
-                status = "pass"
-                ev = desc
-            out.append({"framework": fw, "control": control,
-                        "status": status, "evidence": ev})
+        evaluate = REGISTRY.get(fw)
+        if evaluate is None:
+            continue
+        out.extend(evaluate(sig))
     return out

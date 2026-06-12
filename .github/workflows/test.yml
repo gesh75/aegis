@@ -40,3 +40,6 @@ jobs:
 
       - name: Flask endpoints (sim-tier server, test-client)
         run: python -m aegis.tests.api_test
+
+      - name: Compliance frameworks (per-framework self-tests + schema-valid multi-framework bundle)
+        run: python -m aegis.tests.compliance_test
