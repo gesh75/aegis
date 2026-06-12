@@ -73,12 +73,18 @@ def parse_nornir_bgp(resp: dict) -> tuple[int, int, bool]:
     """
     results = resp.get("results", [])
     node_count = int(resp.get("devices", len(results)))
-    converged = int(resp.get("error", 0)) == 0
+    # fail closed: a response missing the error/results contract is NOT converged
+    converged = "error" in resp and "results" in resp and int(resp.get("error", 1)) == 0
     bgp_up = 0
     for r in results:
         out = r.get("output", "") or ""
-        # FRR/EOS 'show bgp summary' Established peers => numeric PfxRcd in state col.
-        est = len(re.findall(r"\b(?:Estab|Established|\b\d+\b\s*$)", out, re.MULTILINE))
+        # FRR/EOS 'show bgp summary': a peer row starts with the neighbor IP and is
+        # Established when the State/PfxRcd column is numeric or 'Estab*'. Matching
+        # peer rows only — a bare digit-terminated line (uptimes, counters, totals)
+        # must NOT count as a session.
+        est = len(re.findall(
+            r"^\s*\d{1,3}(?:\.\d{1,3}){3}\s+\S.*?\s(?:\d+|Estab\w*)\s*$",
+            out, re.MULTILINE))
         bgp_up += est if est else (1 if r.get("status") == "ok" else 0)
     return bgp_up, node_count, converged
 
@@ -114,11 +120,11 @@ def parse_configgen(content: str, lab: str) -> list[GeneratedConfig]:
     raw = m.group(0) if m else content
     try:
         data = json.loads(raw)
-    except json.JSONDecodeError:
-        # last-resort: emit one frr stub so the pipeline still produces a bundle
-        return [GeneratedConfig(device=f"{lab}-node-1", vendor="frr",
-                                config="# (LLM returned unparseable output)",
-                                grounded_commands=[])]
+    except json.JSONDecodeError as exc:
+        # fail closed: a no-op stub would sail through validation and produce a
+        # sealed ship_ready bundle for a change that was never actually generated
+        from aegis.core.orchestrator.pipeline import PreflightError
+        raise PreflightError("generation_failed: LLM returned unparseable output") from exc
     out: list[GeneratedConfig] = []
     vendors = _LAB_VENDORS.get(lab, ["frr"])
     for i, c in enumerate(data.get("configs", [])):

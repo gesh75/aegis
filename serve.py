@@ -22,6 +22,7 @@ from flask import Flask, Response, jsonify, request
 from aegis.core.orchestrator.pipeline import run_preflight, PreflightError
 from aegis.core.backends.simulator import SimulatorBackend
 from aegis.evidence.pdf import render_pdf
+from aegis.evidence.bundler import verify as bundler_verify
 from aegis.core.seal import Ed25519Signer, Ed25519Verifier, seal_response, verify_seal
 
 _UI = os.path.join(os.path.dirname(__file__), "ui", "preflight_screen.html")
@@ -54,7 +55,9 @@ def _load_signer() -> Ed25519Signer:
         try:
             return Ed25519Signer.from_private_bytes(bytes.fromhex(raw))
         except Exception as exc:  # noqa: BLE001
-            print(f"[aegis.seal] AEGIS_SEAL_KEY invalid ({exc}); using an ephemeral key")
+            # fail closed: an explicitly-pinned key that cannot load must be fatal —
+            # silently degrading to an ephemeral key would mint seals nobody can verify
+            raise SystemExit(f"[aegis.seal] AEGIS_SEAL_KEY invalid ({exc}); refusing to start") from exc
     print("[aegis.seal] no AEGIS_SEAL_KEY set - EPHEMERAL demo signing key "
           "(production uses a YubiKey-PIV key; receipts will not persist across restarts)")
     return Ed25519Signer.generate()
@@ -77,6 +80,13 @@ def _security_headers(resp: Response) -> Response:
 def root():
     return Response('<meta http-equiv="refresh" content="0; url=/preflight">',
                     mimetype="text/html")
+
+
+@app.get("/favicon.ico")
+def favicon() -> Response:
+    # the UI ships an inline data-URI icon; answer the browser's automatic
+    # /favicon.ico probe so the console stays free of 404 noise
+    return Response(status=204)
 
 
 @app.get("/preflight")
@@ -129,6 +139,11 @@ def evidence_pdf():
     bundle = request.get_json(silent=True) or {}
     if not bundle.get("integrity", {}).get("sha256"):
         return jsonify({"error": "valid evidence bundle required"}), 400
+    # never render a tampered/forged bundle into an examiner-ready artifact:
+    # the integrity hash must verify before ReportLab ever sees the content
+    if not bundler_verify(bundle):
+        return jsonify({"error": "bundle integrity verification failed "
+                                 "(content does not match integrity.sha256)"}), 422
     try:
         pdf = render_pdf(bundle)
     except Exception as e:  # noqa: BLE001

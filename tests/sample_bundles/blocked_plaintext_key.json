@@ -86,17 +86,17 @@
       "warnings": 6,
       "passed": 6,
       "findings": [
-        "clos-evpn-node-1: plaintext BGP auth-key (PCI 8.3.1 fail)",
+        "clos-evpn-node-1: plaintext BGP auth-key (PCI 8.3.2 fail)",
         "clos-evpn-node-1: BGP neighbor without export policy",
-        "clos-evpn-node-2: plaintext BGP auth-key (PCI 8.3.1 fail)",
+        "clos-evpn-node-2: plaintext BGP auth-key (PCI 8.3.2 fail)",
         "clos-evpn-node-2: BGP neighbor without export policy",
-        "clos-evpn-node-3: plaintext BGP auth-key (PCI 8.3.1 fail)",
+        "clos-evpn-node-3: plaintext BGP auth-key (PCI 8.3.2 fail)",
         "clos-evpn-node-3: BGP neighbor without export policy",
-        "clos-evpn-node-4: plaintext BGP auth-key (PCI 8.3.1 fail)",
+        "clos-evpn-node-4: plaintext BGP auth-key (PCI 8.3.2 fail)",
         "clos-evpn-node-4: BGP neighbor without export policy",
-        "clos-evpn-node-5: plaintext BGP auth-key (PCI 8.3.1 fail)",
+        "clos-evpn-node-5: plaintext BGP auth-key (PCI 8.3.2 fail)",
         "clos-evpn-node-5: BGP neighbor without export policy",
-        "clos-evpn-node-6: plaintext BGP auth-key (PCI 8.3.1 fail)",
+        "clos-evpn-node-6: plaintext BGP auth-key (PCI 8.3.2 fail)",
         "clos-evpn-node-6: BGP neighbor without export policy"
       ]
     },
@@ -122,7 +122,7 @@
       },
       {
         "framework": "pci_dss_v4",
-        "control": "8.3.1",
+        "control": "8.3.2",
         "status": "fail",
         "evidence": "plaintext auth-key present"
       }

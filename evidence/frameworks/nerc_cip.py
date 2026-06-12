@@ -41,10 +41,14 @@ def evaluate(sig: ComplianceSignal) -> list[dict]:
     # AEGIS validates the deviation in a digital twin and emits a sealed evidence bundle;
     # promotion to production is gated on human authorization (the documented authorization
     # itself is recorded in the entity's change-management system).
+    twin_ok = sig.twin_tested() and sig.twin_converged()
     out.append(control(
-        FRAMEWORK, "CIP-010-R1.2", PASS,
+        FRAMEWORK, "CIP-010-R1.2",
+        PASS if twin_ok else NA,
         "deviation from baseline validated in digital twin and sealed in evidence bundle; "
-        "production promotion gated on human authorization",
+        "production promotion gated on human authorization" if twin_ok
+        else "no converged twin run recorded — baseline-deviation testing "
+             "not demonstrable for this run",
         PROCESS_MAPPED))
 
     # R1.4 — Following the change, verify required CIP-005/CIP-007 controls are not adversely
@@ -100,11 +104,20 @@ SELF_TEST = [
       "diff": {"sessions_dropped": ["uk-lon-core-01<->de-fra-core-01"]}},
      "CIP-010-R1.4", FAIL),
 
-    # Baseline authorization is always process-mapped PASS for a validated run.
+    # Baseline authorization passes only when a converged twin run is recorded.
+    ({"configs": [{"device": "de-fra-core-01", "vendor": "frr",
+                   "config": "router bgp 65001\n neighbor 10.200.0.12 remote-as 65002",
+                   "grounded_commands": []}],
+      "batfish": {"errors": 0, "warnings": 0, "passed": 2, "findings": []},
+      "twin": {"converged": True},
+      "diff": {"sessions_dropped": []}},
+     "CIP-010-R1.2", PASS),
+
+    # No twin run recorded -> R1.2 NA (twin testing not demonstrable).
     ({"configs": [{"device": "de-fra-core-01", "vendor": "frr",
                    "config": "router bgp 65001\n neighbor 10.200.0.12 remote-as 65002",
                    "grounded_commands": []}],
       "batfish": {"errors": 0, "warnings": 0, "passed": 2, "findings": []},
       "diff": {"sessions_dropped": []}},
-     "CIP-010-R1.2", PASS),
+     "CIP-010-R1.2", NA),
 ]

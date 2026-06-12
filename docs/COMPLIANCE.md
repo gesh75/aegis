@@ -28,7 +28,7 @@ NERC CIP / HIPAA = Tier 2; ISO 27001 / IEC 62443 / NIST 800-171 = Tier 4.
 
 | id | Full name | Tier | Controls covered | Config-checked |
 |---|---|---|---|---|
-| `pci_dss_v4` | PCI DSS v4.0 — Payment Card Industry Data Security Standard | Original | 1.2.1 (network security controls), 8.3.1 (strong crypto for auth) | 2 of 2 |
+| `pci_dss_v4` | PCI DSS v4.0 — Payment Card Industry Data Security Standard | Original | 1.2.1 (network security controls), 8.3.2 (strong crypto for auth) | 2 of 2 |
 | `soc2` | SOC 2 (AICPA Trust Services Criteria) | Original | CC8.1 (change management) | 0 of 1 |
 | `nist_800-53` | NIST SP 800-53 — Security and Privacy Controls (Config Management) | Original | CM-3 (change control), CM-6 (config settings) | 1 of 2 |
 | `disa_stig` | DISA STIG — Cisco Router/Switch RTR (CISC-RT-*) | Tier 1 | CISC-RT-000480 (unique per-AS BGP key), CISC-RT-000560 (BGP max-prefix), CISC-RT-000470 (eBGP GTSM/ttl-security), CISC-RT-000050 (FIPS 198-1 routing-proto auth) | 4 of 4 |

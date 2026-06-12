@@ -21,10 +21,10 @@ def evaluate(sig: ComplianceSignal) -> list[dict]:
         else "export/import policy present on BGP neighbors",
         CONFIG_CHECKED))
 
-    # 8.3.1 — strong cryptography for authentication; no plaintext credentials
+    # 8.3.2 — strong cryptography for authentication; no plaintext credentials
     plain = sig.has_plaintext_secret()
     out.append(control(
-        FRAMEWORK, "8.3.1",
+        FRAMEWORK, "8.3.2",
         FAIL if plain else PASS,
         "plaintext authentication material in config" if plain
         else "no plaintext authentication material in generated config",
@@ -39,10 +39,10 @@ SELF_TEST = [
                    "config": "# set bgp authentication-key plaintext abc123",
                    "grounded_commands": []}],
       "batfish": {"errors": 1, "warnings": 0, "passed": 1,
-                  "findings": ["d: plaintext BGP auth-key (PCI 8.3.1 fail)"]}},
-     "8.3.1", FAIL),
+                  "findings": ["d: plaintext BGP auth-key (PCI 8.3.2 fail)"]}},
+     "8.3.2", FAIL),
     ({"configs": [{"device": "d", "vendor": "frr",
                    "config": "# add vlan 10", "grounded_commands": []}],
       "batfish": {"errors": 0, "warnings": 0, "passed": 1, "findings": []}},
-     "8.3.1", PASS),
+     "8.3.2", PASS),
 ]

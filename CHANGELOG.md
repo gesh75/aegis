@@ -3,6 +3,30 @@
 All notable changes to AEGIS. Format follows [Keep a Changelog](https://keepachangelog.com);
 versioning is [SemVer](https://semver.org).
 
+## [0.2.0] — 2026-06-12
+
+Hardening release driven by a 16-agent adversarially-verified review (security,
+quality, compliance-domain, API/UI lenses) — see `docs/IMPROVEMENT_PLAN_2026-06.md`.
+
+### Fixed
+- **Compliance defensibility**: NIST 800-53 CM-3, SOC 2 CC8.1 and NERC CIP-010-R1.2 no
+  longer assert "verified in digital twin" unconditionally — they now gate on a recorded,
+  converged twin run and report `not_applicable` otherwise (mirrors the HIPAA pattern).
+- **PCI DSS v4 control id**: strong-cryptography-for-authentication check relabeled
+  8.3.1 → 8.3.2 (the correct requirement number) across module, docs and sample bundles.
+- **BGP convergence parser** (`http_backend.parse_nornir_bgp`): the Established-session
+  count matched any digit-terminated line; it now matches real peer rows only
+  (neighbor IP + numeric/Estab state column) and fails closed on a malformed response.
+- Missing runtime dependency `httpx` added to requirements.txt; `/favicon.ico` 404 noise.
+
+### Security
+- **Evidence PDF endpoint verifies bundle integrity** before rendering — a tampered or
+  forged bundle is rejected with 422 instead of becoming an "examiner-ready" artifact.
+- **Seal key fails closed**: an invalid `AEGIS_SEAL_KEY` now refuses to start instead of
+  silently degrading to an ephemeral key.
+- **LLM output fails closed**: unparseable generation raises `generation_failed` instead
+  of synthesizing a no-op stub config that would sail through validation to `ship_ready`.
+
 ## [0.1.0] — 2026-05-28
 
 First public release of the community core. Air-gapped, self-hostable, sim-tier — the whole
