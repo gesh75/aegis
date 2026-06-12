@@ -101,7 +101,13 @@ def main() -> int:
     check("configgen.count", len(cfgs) == 2, str(cfgs))
     check("configgen.vendor", cfgs[0]["vendor"] == "srlinux")
     check("configgen.grounded", cfgs[0]["grounded_commands"] == ["set / interface"])
-    check("configgen.garbage_safe", len(parse_configgen("not json at all", "single")) == 1)
+    # fail closed: unparseable LLM output must raise, never become a passing stub
+    try:
+        parse_configgen("not json at all", "single")
+        garbage_raises = False
+    except Exception as exc:  # noqa: BLE001
+        garbage_raises = "generation_failed" in str(exc)
+    check("configgen.garbage_fails_closed", garbage_raises)
 
     # show the typed results so the mapping is visible
     print(json.dumps({
