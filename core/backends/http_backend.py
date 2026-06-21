@@ -27,6 +27,7 @@ reusing your MODEL_RUNNER_URL OpenAI-compatible chat endpoint.
 """
 from __future__ import annotations
 import json
+import os
 import re
 import urllib.error
 import urllib.request
@@ -145,6 +146,14 @@ class HttpBackend:
     def __init__(self, base_url: str = _DEFAULT_BASE,
                  model_runner_url: str = _DEFAULT_MODEL_RUNNER,
                  model: str = "ai/qwen3:latest", timeout: float = 60.0):
+        # Air-gap fail-closed invariant: when AEGIS_AIRGAP=1, refuse any non-loopback
+        # base_url / model_runner_url BEFORE a socket opens. Gated + imported the same
+        # way as the core/llm chain (see core/llm/backends.py). The HTTP backend talks
+        # to BOTH the in-perimeter tool (:5757) and the model runner, so both are checked.
+        if os.environ.get("AEGIS_AIRGAP", "") == "1":
+            from aegis.core.llm.airgap import assert_airgap_ok
+            assert_airgap_ok("local", base_url)
+            assert_airgap_ok("local", model_runner_url)
         self.base = base_url.rstrip("/")
         self.model_runner = model_runner_url.rstrip("/")
         self.model = model
