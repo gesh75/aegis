@@ -137,7 +137,7 @@ def test_is_loopback() -> None:
     assert is_loopback("http://127.0.0.1:11434")
     assert is_loopback("http://localhost:11434")
     assert is_loopback("http://127.5.5.5:1")
-    assert is_loopback("http://box.local")
+    assert not is_loopback("http://box.local")
     assert not is_loopback("https://api.anthropic.com")
     assert not is_loopback("http://10.0.0.5:11434")
 
@@ -152,12 +152,13 @@ def test_airgap_refuses_cloud_construction() -> None:
 
 
 def test_airgap_refuses_non_loopback() -> None:
-    raised = False
-    try:
-        assert_airgap_ok("openai-compatible-local", "https://evil.example.com")
-    except RuntimeError:
-        raised = True
-    assert raised, "non-loopback egress must be forbidden in air-gap mode"
+    for url in ("https://evil.example.com", "http://model-runner.local:11434"):
+        raised = False
+        try:
+            assert_airgap_ok("openai-compatible-local", url)
+        except RuntimeError:
+            raised = True
+        assert raised, f"non-loopback egress must be forbidden in air-gap mode: {url}"
 
 
 def test_airgap_allows_loopback_local() -> None:
