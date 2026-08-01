@@ -48,6 +48,17 @@ NORNIR_DEGRADED = {
         {"hostname": "de-fra-edge-01", "status": "error", "output": "Connection refused","elapsed": 0.4},
     ],
 }
+NORNIR_IPV6 = {
+    "task": "BGP Health", "site": "de-fra", "devices": 1, "workers": 50,
+    "elapsed": 0.4, "ok": 1, "warn": 0, "error": 0,
+    "results": [{
+        "hostname": "de-fra-core-01", "status": "ok", "elapsed": 0.4,
+        "output": (
+            "2001:db8::1 4 65001 10 10 0 0 0 00:10:00 42\n"
+            "2001:db8:0:1::2 4 65002 10 10 0 0 0 00:10:00 Estab"
+        ),
+    }],
+}
 
 PYATS_DIFF = {
     "hostname": "de-fra-core-01", "total_changes": 3,
@@ -89,6 +100,8 @@ def main() -> int:
     up2, nodes2, conv2 = parse_nornir_bgp(NORNIR_DEGRADED)
     check("nornir.degraded.notconverged", conv2 is False, f"conv={conv2}")
     check("nornir.degraded.nodes", nodes2 == 6)
+    ipv6_up, _, _ = parse_nornir_bgp(NORNIR_IPV6)
+    check("nornir.ipv6.bgp_up", ipv6_up == 2, f"up={ipv6_up}")
 
     # pyats diff
     d = parse_pyats_diff(PYATS_DIFF)
@@ -123,7 +136,7 @@ def main() -> int:
         for f in FAILS:
             print("  -", f)
         return 1
-    print(f"\n=== CONTRACT TEST: PASS ({4+3+3+4} checks) ===")
+    print(f"\n=== CONTRACT TEST: PASS ({4+4+3+4} checks) ===")
     return 0
 
 

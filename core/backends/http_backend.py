@@ -78,12 +78,14 @@ def parse_nornir_bgp(resp: dict) -> tuple[int, int, bool]:
     bgp_up = 0
     for r in results:
         out = r.get("output", "") or ""
-        # FRR/EOS 'show bgp summary': a peer row starts with the neighbor IP and is
+        # FRR/EOS 'show bgp summary': a peer row starts with the neighbor IP
+        # (v4 or v6) and is
         # Established when the State/PfxRcd column is numeric or 'Estab*'. Matching
         # peer rows only — a bare digit-terminated line (uptimes, counters, totals)
         # must NOT count as a session.
         est = len(re.findall(
-            r"^\s*\d{1,3}(?:\.\d{1,3}){3}\s+\S.*?\s(?:\d+|Estab\w*)\s*$",
+            r"^\s*(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]+)"
+            r"\s+\S.*?\s(?:\d+|Estab\w*)\s*$",
             out, re.MULTILINE))
         bgp_up += est if est else (1 if r.get("status") == "ok" else 0)
     return bgp_up, node_count, converged
