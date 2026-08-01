@@ -33,7 +33,7 @@ _LOOPBACK_NAMES: frozenset[str] = frozenset({"localhost", "ip6-localhost"})
 
 def is_loopback(url: str) -> bool:
     """True only for a genuine loopback address (127.0.0.0/8 or ::1), the literal name
-    'localhost', or a reserved, non-routable '.local' mDNS host (in-perimeter only).
+    'localhost', or a permitted literal loopback alias.
 
     Uses strict `ipaddress` parsing rather than a string prefix, so a host that merely
     *starts with* "127." but is actually a routable name (e.g. ``127.evil.com``) is
@@ -48,9 +48,9 @@ def is_loopback(url: str) -> bool:
     try:
         return ip_address(host).is_loopback  # 127.0.0.0/8 and ::1, strictly
     except ValueError:
-        # Not a literal IP. Only the reserved, non-internet-routable mDNS suffix is
-        # treated as in-perimeter (RFC 6762); everything else is non-loopback.
-        return host.endswith(".local")
+        # Hostnames (including mDNS ``.local`` names) can resolve to another machine.
+        # Fail closed without DNS resolution; only aliases listed above are trusted.
+        return False
 
 
 def assert_airgap_ok(provider: str, base_url: str) -> None:
