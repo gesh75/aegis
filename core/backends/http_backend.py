@@ -84,7 +84,7 @@ def parse_nornir_bgp(resp: dict) -> tuple[int, int, bool]:
         # peer rows only — a bare digit-terminated line (uptimes, counters, totals)
         # must NOT count as a session.
         est = len(re.findall(
-            r"^\s*(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]+)"
+            r"^\s*(?:\d{1,3}(?:\.\d{1,3}){3}|(?=[^\s]*:)[0-9A-Fa-f:.]+)"
             r"\s+\S.*?\s(?:\d+|Estab\w*)\s*$",
             out, re.MULTILINE))
         bgp_up += est if est else (1 if r.get("status") == "ok" else 0)

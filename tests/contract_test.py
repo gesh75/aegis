@@ -103,6 +103,11 @@ def main() -> int:
     check("nornir.degraded.nodes", nodes2 == 6)
     ipv6_up, _, _ = parse_nornir_bgp(NORNIR_IPV6)
     check("nornir.ipv6.bgp_up", ipv6_up == 2, f"up={ipv6_up}")
+    malformed_up, _, _ = parse_nornir_bgp({
+        "devices": 1, "error": 1,
+        "results": [{"status": "warn", "output": ":" * 20_000}],
+    })
+    check("nornir.malformed_ipv6.bgp_up", malformed_up == 0, f"up={malformed_up}")
 
     # pyats diff
     d = parse_pyats_diff(PYATS_DIFF)
