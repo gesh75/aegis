@@ -16,9 +16,42 @@ FAIL is AEGIS correctly catching a real gap in THIS change — never a claim of 
 compliance. Evidence describes this run only.
 """
 from __future__ import annotations
+import re
+
 from ._base import ComplianceSignal, control, PASS, FAIL, NA, CONFIG_CHECKED
 
 FRAMEWORK = "disa_stig"
+
+
+def _bgp_peers_and_authenticated_peers(sig: ComplianceSignal) -> tuple[set[str], set[str]]:
+    """Return Cisco-style BGP peers and peers with an explicit auth directive."""
+    peers: set[str] = set()
+    authenticated: set[str] = set()
+    for line in sig.text().splitlines():
+        peer = re.search(r"\bneighbor\s+(\S+)\s+remote-as\b", line)
+        if peer:
+            peers.add(peer.group(1))
+
+        auth = re.search(
+            r"\bneighbor\s+(\S+)\s+"
+            r"(?:password\s+[789]\b|key-chain\b|authentication-key\s+encrypted\b|ao\b)",
+            line,
+        )
+        if auth:
+            authenticated.add(auth.group(1))
+    return peers, authenticated
+
+
+def _has_protocol_auth_binding(sig: ComplianceSignal) -> bool:
+    """Require authentication to be attached to a routing peer/interface."""
+    for line in sig.text().splitlines():
+        if re.search(
+            r"\bneighbor\s+\S+\s+(?:key-chain|ao|authentication-key)\b", line
+        ):
+            return True
+        if re.search(r"\b(?:ospf|isis|rip)\b.*\bauthentication\b", line):
+            return True
+    return False
 
 
 def evaluate(sig: ComplianceSignal) -> list[dict]:
@@ -26,6 +59,8 @@ def evaluate(sig: ComplianceSignal) -> list[dict]:
     has_bgp = sig.has_bgp()
     has_proto = sig.has_routing_proto()
     plaintext = sig.has_plaintext_secret()
+    bgp_peers, authenticated_bgp_peers = _bgp_peers_and_authenticated_peers(sig)
+    all_bgp_peers_authenticated = bool(bgp_peers) and bgp_peers <= authenticated_bgp_peers
 
     # CISC-RT-000480 — unique key for each AS the BGP router peers with.
     # FAIL on plaintext auth material, PASS if BGP present with non-plaintext auth,
@@ -35,11 +70,11 @@ def evaluate(sig: ComplianceSignal) -> list[dict]:
             FRAMEWORK, "CISC-RT-000480", NA,
             "no BGP configured in this change; unique-per-AS key requirement N/A",
             CONFIG_CHECKED))
-    elif plaintext:
+    elif plaintext or not all_bgp_peers_authenticated:
         out.append(control(
             FRAMEWORK, "CISC-RT-000480", FAIL,
-            "BGP present with plaintext authentication key — fails unique encrypted "
-            "per-AS key requirement",
+            "BGP present with plaintext, missing, or unverifiable per-peer encrypted "
+            "authentication — fails unique encrypted per-AS key requirement",
             CONFIG_CHECKED))
     else:
         out.append(control(
@@ -94,9 +129,10 @@ def evaluate(sig: ComplianceSignal) -> list[dict]:
             "no routing protocol in this change; FIPS-auth requirement N/A",
             CONFIG_CHECKED))
     else:
-        has_fips_auth = sig.has_token(
+        has_fips_algorithm = sig.has_token(
             "hmac-sha", "key-chain", "key chain", "cryptographic-algorithm",
             "message-digest", "ao ", "authentication mode")
+        has_fips_auth = has_fips_algorithm and _has_protocol_auth_binding(sig)
         if plaintext or not has_fips_auth:
             out.append(control(
                 FRAMEWORK, "CISC-RT-000050", FAIL,
@@ -123,6 +159,30 @@ SELF_TEST = [
                    "grounded_commands": []}],
       "batfish": {"errors": 1, "warnings": 0, "passed": 0, "findings": []}},
      "CISC-RT-000480", FAIL),
+
+    # Unrelated key-chain/HMAC tokens do not authenticate a BGP peer.
+    ({"configs": [{"device": "r1", "vendor": "cisco_ios",
+                   "config": "router bgp 65001\n neighbor 10.1.1.9 remote-as 65002\n"
+                             " neighbor 10.1.1.9 maximum-prefix 5000\n"
+                             "key chain UNUSED\n cryptographic-algorithm hmac-sha-256",
+                   "grounded_commands": []}],
+      "batfish": {"errors": 0, "warnings": 0, "passed": 1, "findings": []}},
+     "CISC-RT-000480", FAIL),
+
+    ({"configs": [{"device": "r1", "vendor": "cisco_ios",
+                   "config": "router bgp 65001\n neighbor 10.1.1.9 remote-as 65002\n"
+                             "key chain UNUSED\n cryptographic-algorithm hmac-sha-256",
+                   "grounded_commands": []}],
+      "batfish": {"errors": 0, "warnings": 0, "passed": 1, "findings": []}},
+     "CISC-RT-000050", FAIL),
+
+    # Every BGP peer has explicit, encrypted authentication.
+    ({"configs": [{"device": "r1", "vendor": "cisco_ios",
+                   "config": "router bgp 65001\n neighbor 10.1.1.9 remote-as 65002\n"
+                             " neighbor 10.1.1.9 password 7 encrypted-value",
+                   "grounded_commands": []}],
+      "batfish": {"errors": 0, "warnings": 0, "passed": 1, "findings": []}},
+     "CISC-RT-000480", PASS),
 
     # BGP present without maximum-prefix -> 000560 FAIL (real gap AEGIS catches)
     ({"configs": [{"device": "r1", "vendor": "cisco_ios",
