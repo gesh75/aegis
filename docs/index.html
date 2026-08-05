@@ -319,7 +319,7 @@
     .kv .v { color: var(--ink); font-weight: 600; text-align: right; }
     .kv .v.seal { color: var(--amber); font-family: var(--mono); }
 
-    /* ---------- mermaid ---------- */
+    /* ---------- offline diagram sources ---------- */
     .diagram-block { margin: 0 0 26px; }
     .diagram-title { display: flex; align-items: center; gap: 10px; margin: 0 0 6px; font-size: 1.06rem; font-weight: 700; color: var(--ink); }
     .diagram-title .tag {
@@ -985,9 +985,7 @@ python -m aegis.tests.promote_test           # Phase 2 approval-gate safety">Cop
 
   <button type="button" class="to-top" id="toTop" aria-label="Back to top">↑</button>
 
-  <script type="module">
-    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
-
+  <script>
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     /* ---------- content model (grounded) ---------- */
@@ -1065,18 +1063,6 @@ python -m aegis.tests.promote_test           # Phase 2 approval-gate safety">Cop
         <p class="resp">${esc(c.responsibility)}</p>
         <span class="techtag">${esc(c.tech)}</span>
       </article>`).join('');
-
-    /* ---------- mermaid ---------- */
-    mermaid.initialize({
-      startOnLoad: true,
-      theme: 'dark',
-      securityLevel: 'strict',
-      themeVariables: {
-        primaryColor: '#1e293b', primaryTextColor: '#e2e8f0', lineColor: '#64748b',
-        primaryBorderColor: '#475569', fontFamily: 'ui-sans-serif, system-ui, sans-serif',
-        secondaryColor: '#0d9488', tertiaryColor: '#0e2336'
-      }
-    });
 
     /* ---------- copy buttons ---------- */
     document.querySelectorAll('.copy-btn').forEach(btn => {
