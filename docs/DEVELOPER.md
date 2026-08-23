@@ -63,13 +63,17 @@ Pure functions; contract-tested in `tests/contract_test.py` with **no network**.
 
 ### `parse_nornir_bgp` → `(bgp_up, node_count, converged)`
 
-- `converged` is true only when the payload has both `error` and `results` **and**
-  `error == 0`. Missing keys → not converged.
+- `converged` is true only when the payload has both `error` and `results`, `error == 0`,
+  `results` is a non-empty list, and at least one Established session was observed.
+  Missing keys, `results: null`, Idle-only output, or an empty inventory → not converged.
 - A device contributes Established peers from `show bgp summary`-shaped output: a line
   starting with an IPv4 address **or** an IPv6 address (must contain `:`) and ending with a
   numeric prefix-received column or `Estab*`.
 - Bare digit-terminated lines (uptimes, totals) do **not** count.
-- If that regex finds nothing, the fallback is `1` when `status == "ok"`, else `0`.
+- Nornir `status == "ok"` means the command ran — it is **not** a session. There is no
+  ok-status fallback (that path used to invent one session per device and seal `ship_ready`).
+- `apply_succeeded` is true only when the apply response has `applied is True`. A missing
+  key, the string `"true"`, or a non-dict body fails closed.
 - A 20k-character flood of `:` is treated as zero sessions (ReDoS guard + fail-closed).
 
 Twin verdict uses these counts: `bgp_after < bgp_before` → `blocked`. An IPv6-only fabric
@@ -78,10 +82,10 @@ was previously under-counted; do not compare old vs new `bgp_sessions` numbers b
 ### `parse_configgen`
 
 - Extracts the first JSON object (tolerates Qwen `<think>` preamble / fences).
-- **Unparseable JSON** → `PreflightError("generation_failed: LLM returned unparseable output")`.
+- **Unparseable JSON** or a non-object payload → `PreflightError("generation_failed: …")`.
   No stub config, no `ship_ready`.
-- Valid `{"configs":[]}` still yields one comment stub (`# (no configs returned)`). That is
-  parse-success, not the fail-closed path.
+- Empty, blank, or non-list `configs` also raise `generation_failed`. There is no
+  `# (no configs returned)` stub.
 
 ---
 

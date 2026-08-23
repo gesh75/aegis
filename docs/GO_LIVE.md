@@ -123,7 +123,8 @@ unique name + mgmt network + `10.x` subnet, so it never collides. It is destroye
 | `stage: guard` | empty/oversized/injection intent, or config_import with no config | fix the input |
 | `502 … URLError` | LLM endpoint unreachable | check `AEGIS_LLM_URL`, §0 curl |
 | `AEGIS_AIRGAP=1: non-loopback egress forbidden` | LLM URL is not loopback | use `http://127.0.0.1:…` or `http://localhost:…` — not a LAN IP, not `*.local` |
-| `generation_failed` | LLM returned non-JSON | fix the model / prompt; AEGIS will **not** synthesize a passing stub |
+| `generation_failed` | LLM returned non-JSON, a non-object, or empty/blank `configs` | fix the model / prompt; AEGIS will **not** synthesize a passing stub |
+| Idle BGP still `ok` but not `ship_ready` | command ran; no Established peer rows | expected fail-closed — `status==ok` is not a session |
 | `AEGIS_SEAL_KEY invalid … refusing to start` | pinned seal key is not 64 hex | unset for demo, or supply a valid seed |
 | `no-self-escalation` / promote 403 | required authority > ceiling, or AS/RD/RT | expected — fabric-identity is never auto-promotable |
 | `422` on evidence PDF | bundle hash does not match content | re-run PreFlight; do not edit a sealed bundle |

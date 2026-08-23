@@ -359,9 +359,9 @@ When `AEGIS_AIRGAP=1`:
    resolve to another machine).
 4. An in-process `anthropic` SDK import aborts construction.
 
-Unparseable LLM JSON raises `PreflightError("generation_failed: …")` instead of becoming a
-no-op stub that would sail to `ship_ready`. Empty-but-valid `{"configs":[]}` still yields a
-comment stub (`# (no configs returned)`); that path is parse-success, not garbage.
+Unparseable LLM JSON, a non-object payload, or empty/blank `configs` raises
+`PreflightError("generation_failed: …")`. There is no `# (no configs returned)` stub —
+that path used to sail to `ship_ready`.
 
 Model identity is sealed into `change.model_identity`:
 
