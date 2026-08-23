@@ -102,7 +102,8 @@ class _RecordingBackend(HttpBackend):
             if url.endswith("/api/nornir/run"):
                 return {"devices": 4, "error": 0,
                         "results": [{"hostname": f"n{i}", "status": "ok",
-                                     "output": "Established"} for i in range(4)]}
+                                     "output": f"10.0.0.{i+1} 4 65010 10 10 0 0 0 00:10:00 Established"}
+                                    for i in range(4)]}
             if url.endswith("/api/preflight/twin/apply"):
                 return {"applied": True}
             if url.endswith("/api/pyats/diff"):
