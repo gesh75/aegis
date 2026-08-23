@@ -36,6 +36,17 @@ AEGIS live mode is fully env-driven. Set what applies, then (re)start the server
 # LLM (defaults already match a stock Ollama + gemma4)
 export AEGIS_LLM_URL=http://localhost:11434       # OpenAI-compat /v1
 export AEGIS_LLM_MODEL=gemma4:latest
+# Air-gap: refuse cloud + any non-loopback URL (including host.local / mDNS)
+# export AEGIS_AIRGAP=1
+# Optional: sha256 the served weights into change.model_identity
+# export AEGIS_LLM_WEIGHTS=/path/to/model.gguf
+
+# Autonomy ceiling (default HOTL). Invalid values refuse to load; BLOCK is rejected.
+# export AEGIS_MAX_AUTHORIZED_TIER=HOTL
+
+# Seal: 64 hex chars pins a stable Ed25519 seed. Invalid key = process exits.
+# Missing key = ephemeral demo key (receipts do not survive restart).
+# export AEGIS_SEAL_KEY=<64-hex-private-seed>
 
 # containerlab — Linux native binary:
 export AEGIS_CLAB_MODE=binary
@@ -111,9 +122,15 @@ unique name + mgmt network + `10.x` subnet, so it never collides. It is destroye
 |---|---|---|
 | `stage: guard` | empty/oversized/injection intent, or config_import with no config | fix the input |
 | `502 … URLError` | LLM endpoint unreachable | check `AEGIS_LLM_URL`, §0 curl |
+| `AEGIS_AIRGAP=1: non-loopback egress forbidden` | LLM URL is not loopback | use `http://127.0.0.1:…` or `http://localhost:…` — not a LAN IP, not `*.local` |
+| `generation_failed` | LLM returned non-JSON | fix the model / prompt; AEGIS will **not** synthesize a passing stub |
+| `AEGIS_SEAL_KEY invalid … refusing to start` | pinned seal key is not 64 hex | unset for demo, or supply a valid seed |
+| `no-self-escalation` / promote 403 | required authority > ceiling, or AS/RD/RT | expected — fabric-identity is never auto-promotable |
+| `422` on evidence PDF | bundle hash does not match content | re-run PreFlight; do not edit a sealed bundle |
 | `502 … clab deploy failed` | twin couldn't deploy | the message has the reason (RAM, image, sudo) |
 | `exec: "deploy": not found` | wrong docker image cmd | already fixed — pull latest; clab cmd names the binary |
 | twin spawns but `converged:false` | the change itself breaks convergence | that's a real BLOCKED — working as intended |
+| IPv6 fabric looks down in the twin | old parser ignored v6 peer rows | current `parse_nornir_bgp` counts IPv4 and IPv6 `show bgp summary` rows |
 
 Logs: `tail -f /tmp/dcn5757.log`. Stuck twins: `docker ps | grep clab-twin-` then
 `POST /api/preflight/twin/destroy`.

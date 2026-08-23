@@ -31,7 +31,7 @@ NERC CIP / HIPAA = Tier 2; ISO 27001 / IEC 62443 / NIST 800-171 = Tier 4.
 | `pci_dss_v4` | PCI DSS v4.0 — Payment Card Industry Data Security Standard | Original | 1.2.1 (network security controls), 8.3.2 (strong crypto for auth) | 2 of 2 |
 | `soc2` | SOC 2 (AICPA Trust Services Criteria) | Original | CC8.1 (change management) | 0 of 1 |
 | `nist_800-53` | NIST SP 800-53 — Security and Privacy Controls (Config Management) | Original | CM-3 (change control), CM-6 (config settings) | 1 of 2 |
-| `disa_stig` | DISA STIG — Cisco Router/Switch RTR (CISC-RT-*) | Tier 1 | CISC-RT-000480 (unique per-AS BGP key), CISC-RT-000560 (BGP max-prefix), CISC-RT-000470 (eBGP GTSM/ttl-security), CISC-RT-000050 (FIPS 198-1 routing-proto auth) | 4 of 4 |
+| `disa_stig` | DISA STIG — Cisco Router/Switch RTR (CISC-RT-*) | Tier 1 | CISC-RT-000480 (unique per-AS BGP key **on each neighbor**), CISC-RT-000560 (BGP max-prefix), CISC-RT-000470 (eBGP GTSM/ttl-security), CISC-RT-000050 (FIPS 198-1 auth **bound to a peer/interface**) | 4 of 4 |
 | `cis_v8` | CIS Critical Security Controls v8 | Tier 1 | 4.2 (secure-config process), 12.3 (securely manage network infra), 12.2 (secure network architecture) | 1 of 3 |
 | `nist_csf_2.0` | NIST Cybersecurity Framework 2.0 | Tier 1 | PR.PS-01 (config-mgmt practices), PR.IR-01 (protect from unauthorized logical access), DE.CM-01 (network monitoring) | 2 of 3 |
 | `nerc_cip` | NERC CIP-010 — Configuration Change Management & Vulnerability Assessments | Tier 2 | CIP-010-R1.1 (baseline), CIP-010-R1.2 (authorize/document deviation), CIP-010-R1.4 (CIP-005/007 not adversely affected) | 1 of 3 |
@@ -56,11 +56,48 @@ the proposed change (the remaining 11 are process-mapped to the pipeline).
   simulator's minimal configs a BGP change without the required hardening directive
   (max-prefix, GTSM, FIPS key-chain) legitimately returns **FAIL** — AEGIS catching a real
   gap in *this* change, not a certification verdict.
-- **Process-mapped controls** assert what the pipeline guarantees: change validated in a
-  digital twin (`twin_converged`), no sessions dropped (`sessions_dropped`), sealed
-  content-hashed evidence bundle, and human-gated promotion. Examples: SOC2 CC8.1,
-  NIST 800-53 CM-3, CIS 4.2, NERC CIP-010 R1.1/R1.2, HIPAA 164.308(a)(8)/164.312(b),
-  ISO A.8.32, and NIST 800-171 3.4.1/3.4.3.
+
+### DISA STIG — authentication must bind to the routing peer
+
+CISC-RT-000480 and CISC-RT-000050 do **not** pass because a key-chain or HMAC token merely
+appears somewhere in the same config. After the peer-binding fix, unused `key chain UNUSED`
+/ `cryptographic-algorithm hmac-sha-256` lines no longer authenticate a neighbor.
+
+| Control | What must be true on *this* change |
+|---|---|
+| **CISC-RT-000480** | Every Cisco-style `neighbor <peer> remote-as` has a matching encrypted auth directive on the **same** peer: `password 7/8/9`, `key-chain`, `authentication-key encrypted`, or `ao`. `password 0` / plaintext secrets fail. No BGP → `not_applicable`. |
+| **CISC-RT-000050** | A FIPS 198-1 algorithm token (`hmac-sha`, `key-chain`, `message-digest`, `ao`, …) **and** a binding on a peer or IGP interface (`neighbor … key-chain\|ao\|authentication-key`, or `ospf`/`isis`/`rip` + `authentication`). Algorithm tokens without a binding fail. |
+
+Worked examples (from `evidence/frameworks/disa_stig.py` `SELF_TEST`):
+
+```text
+# 000480 FAIL — peer exists, unused key-chain does not count
+router bgp 65001
+ neighbor 10.1.1.9 remote-as 65002
+key chain UNUSED
+ cryptographic-algorithm hmac-sha-256
+
+# 000480 PASS — encrypted auth is on the same neighbor
+router bgp 65001
+ neighbor 10.1.1.9 remote-as 65002
+ neighbor 10.1.1.9 password 7 encrypted-value
+
+# 000050 PASS — OSPF auth is bound to the interface
+key chain OSPF_KEY
+ key 1
+  cryptographic-algorithm hmac-sha-256
+router ospf 1
+ interface eth0
+  ip ospf authentication key-chain OSPF_KEY
+```
+
+### Process-mapped controls
+
+These assert what the pipeline guarantees: change validated in a digital twin
+(`twin_converged`), no sessions dropped (`sessions_dropped`), sealed content-hashed
+evidence bundle, and human-gated promotion. Examples: SOC2 CC8.1, NIST 800-53 CM-3,
+CIS 4.2, NERC CIP-010 R1.1/R1.2, HIPAA 164.308(a)(8)/164.312(b), ISO A.8.32, and
+NIST 800-171 3.4.1/3.4.3.
 
 ## Honesty note
 

@@ -305,5 +305,23 @@ failures, live refused without opt-in. Endpoint verified (dry-run ships, blocked
 
 GO-LIVE runbook (Linux native binary + macOS docker-clab, triage table): `docs/GO_LIVE.md`.
 
+### Bounded autonomy (landed on main after the 0.2.0 tag)
+
+The Phase 2 gate grew a fifth rule and three supporting packages. Documented in
+`docs/ARCHITECTURE.md` §§8–10 and `docs/DEVELOPER.md`.
+
+- `core/llm/` — local-first egress; `AEGIS_AIRGAP=1` refuses cloud, non-loopback, and mDNS
+  hostnames at construction; model identity (weights-sha256 or honest identity-claim).
+- `core/risk/authority.py` — severity × change-class → AUTO/HITL/HOTL/BLOCK; AS/RD/RT is
+  always BLOCK; `AEGIS_MAX_AUTHORIZED_TIER` ceiling (default HOTL).
+- `core/seal/` — detached Ed25519 receipt; invalid `AEGIS_SEAL_KEY` refuses to start.
+- `core/promote/gate.py` **G5** — re-derives the ceiling at promote time; missing authority
+  fail-closes.
+- `HttpBackend.parse_nornir_bgp` counts IPv4 **and** IPv6 peer rows; unparseable LLM output
+  raises `generation_failed`.
+- DISA STIG CISC-RT-000480 / 000050 bind authentication to the routing peer, not a stray
+  key-chain token.
+
 Remaining Phase 2: implement + audit a real SSH/NETCONF connector behind the gate, RBAC/SSO,
 multi-tenant hosting, Linux live-twin end-to-end run, eval corpus / golden traces.
+Hardware-PIV signer + compiled-in ceiling: `docs/PIV_HARDWARE_SIGNER_PLAN.md`.
