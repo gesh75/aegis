@@ -117,8 +117,11 @@ python -m aegis.serve             # from the directory ABOVE aegis/
 ```
 
 Type a change (or paste a config), Run PreFlight, watch the verdict + sealed evidence
-bundle, and download the examiner-ready PDF. Live mode (real Qwen3 + containerlab twin)
-ships in the integrated air-gapped product — see [`docs/GO_LIVE.md`](docs/GO_LIVE.md).
+bundle, and download the examiner-ready PDF. The PDF is a rendering of a self-consistent
+bundle — before handing it to an examiner, verify the detached Ed25519 receipt
+(`POST /api/seal/verify`) against the pinned key. See [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
+Live mode (real Qwen3 + containerlab twin) ships in the integrated air-gapped product —
+see [`docs/GO_LIVE.md`](docs/GO_LIVE.md).
 
 ### Air-gapped install (zero egress)
 
@@ -157,7 +160,7 @@ core/promote/        Phase 2 approval gate + connectors (dry-run default)
 evidence/            bundler · sha256 seal · compliance crosswalk · PDF · JSON schema
 ui/                  self-contained PreFlight dashboard
 serve.py             standalone community server (sim tier)
-docs/                PHASES.md · GO_LIVE.md · architecture.svg
+docs/                PHASES.md · GO_LIVE.md · EVIDENCE.md · architecture.svg
 ```
 
 ## Project history & roadmap

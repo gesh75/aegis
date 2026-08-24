@@ -3,6 +3,14 @@
 All notable changes to AEGIS. Format follows [Keep a Changelog](https://keepachangelog.com);
 versioning is [SemVer](https://semver.org).
 
+## [Unreleased]
+
+### Documentation
+- **Evidence runbook** (`docs/EVIDENCE.md`): the two-layer contract — `integrity.sha256`
+  is self-consistency; the detached Ed25519 receipt is origin + ceiling proof. Documents
+  that `POST /api/preflight/evidence/pdf` calls `bundler.verify` only (not `verify_seal`),
+  plus the auditor verify path (`/api/seal/pubkey`, `/api/seal/verify`, G0–G6).
+
 ## [0.2.0] — 2026-06-12
 
 Hardening release driven by a 16-agent adversarially-verified review (security,
@@ -20,8 +28,12 @@ quality, compliance-domain, API/UI lenses) — see `docs/IMPROVEMENT_PLAN_2026-0
 - Missing runtime dependency `httpx` added to requirements.txt; `/favicon.ico` 404 noise.
 
 ### Security
-- **Evidence PDF endpoint verifies bundle integrity** before rendering — a tampered or
-  forged bundle is rejected with 422 instead of becoming an "examiner-ready" artifact.
+- **Evidence PDF endpoint verifies the bundle sha256** before rendering — a body whose
+  fields no longer match `integrity.sha256` is rejected with 422. That check is
+  self-consistency, not origin authentication: a client that computes the public hash
+  over invented content still gets a PDF. Cryptographic authenticity is
+  `POST /api/seal/verify` / `verify_seal` (G0–G6 against the pinned key). See
+  `docs/EVIDENCE.md`.
 - **Seal key fails closed**: an invalid `AEGIS_SEAL_KEY` now refuses to start instead of
   silently degrading to an ephemeral key.
 - **LLM output fails closed**: unparseable generation raises `generation_failed` instead
