@@ -157,7 +157,7 @@ python -m aegis.tests.promote_test           # Phase 2 approval-gate safety
 core/orchestrator/   deterministic pipeline · guards · rollback
 core/backends/       pluggable: simulator (CI) | http (live :5757)
 core/promote/        Phase 2 approval gate + connectors (dry-run default)
-evidence/            bundler · sha256 seal · compliance crosswalk · PDF · JSON schema
+evidence/            bundler · sha256 integrity · detached Ed25519 seal · PDF · JSON schema
 ui/                  self-contained PreFlight dashboard
 serve.py             standalone community server (sim tier)
 docs/                PHASES.md · GO_LIVE.md · EVIDENCE.md · architecture.svg
