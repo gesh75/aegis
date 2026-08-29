@@ -328,7 +328,7 @@ Hardware-PIV signer + compiled-in ceiling: `docs/PIV_HARDWARE_SIGNER_PLAN.md`.
 
 ---
 
-## Phase 3 — Evidence authenticity  ·  in flight 2026-08-29
+## Phase 3 — Evidence authenticity  ·  software closed 2026-08-29
 
 HMAC approvals and API auth close the two remaining honesty holes in the promotion
 path (improvement plan T1 #9 and T1 #10). Hardware PIV stays later — it needs a
@@ -345,5 +345,18 @@ token in hand.
   `GET /api/status`, `POST /api/approve/mint`, `POST /api/preflight/promote`.
 - Tests: `tests/tokens_test.py` in CI; promote P8; api_test auth + mint + promote.
 
-Next on this phase: OSCAL Assessment Results export, one-page CAB export, then
-YubiKey PIV (`docs/PIV_HARDWARE_SIGNER_PLAN.md`) when the hardware is on the desk.
+### OSCAL AR + CAB export  ·  2026-08-29
+
+Closes the two remaining *software* items on Phase 3. Hardware PIV stays later.
+
+- `evidence/oscal.py` — AEGIS-shaped OSCAL 1.1.2 Assessment Results. Remarks admit
+  this is not a FedRAMP package. Integrity.sha256 is self-consistency; authenticity
+  is the detached seal.
+- `evidence/cab.py` — one-page CAB packet. `rollback.verified_in_twin` is always
+  false (plan generated, reversal not executed).
+- `POST /api/preflight/evidence/oscal` and `/cab` — same 400/422 integrity gate as PDF.
+- Tests: `tests/oscal_test.py` in CI.
+
+Phase 3 software is closed. Remaining on this phase: YubiKey PIV
+(`docs/PIV_HARDWARE_SIGNER_PLAN.md`) when the hardware is on the desk.
+Live SSH/NETCONF connector, batfish sidecar, and RBAC stay later.

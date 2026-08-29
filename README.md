@@ -133,7 +133,7 @@ docker load -i aegis-local.tar
 docker compose -f docker-compose.yml -f docker-compose.airgap.yml up  # network_mode: none
 ```
 
-## Test — 7 CI suites, 0 violations
+## Test — 9 CI suites, 0 violations
 
 ```bash
 pip install -r requirements.txt
@@ -142,6 +142,7 @@ python -m aegis.tests.contract_test          # HttpBackend parsers vs real :5757
 python -m aegis.tests.pdf_test               # evidence PDF validity
 python -m aegis.tests.promote_test 6000      # Phase 2 approval-gate safety (G1–G5 + HMAC)
 python -m aegis.tests.tokens_test            # HMAC approval tokens (T1 #9)
+python -m aegis.tests.oscal_test             # OSCAL AR + CAB export (integrity-gated)
 python -m aegis.tests.compliance_test        # 11-framework self-tests + schema-valid bundle
 ```
 
@@ -153,10 +154,12 @@ python -m aegis.tests.compliance_test        # 11-framework self-tests + schema-
 | promotion gate | 6,000 bundles | yes |
 | Flask test-client | 10 tests | yes |
 | twin safety + mgmt isolation | 8,000 ops | yes |
+| HMAC approval tokens | 17 property checks | yes |
+| OSCAL AR + CAB export | integrity-gated JSON | yes |
 | compliance frameworks | per-module `SELF_TEST` | yes |
 
 Local-only property suites (not in `.github/workflows/test.yml`): `llm_egress_test`,
-`authority_test`, `ceiling_test`, `seal_test`, `wedge_test`. HMAC tokens (`tokens_test`)
+`authority_test`, `ceiling_test`, `seal_test`, `wedge_test`. HMAC tokens and OSCAL/CAB
 run in CI. See [`docs/DEVELOPER.md`](docs/DEVELOPER.md).
 
 ## Layout
@@ -168,7 +171,7 @@ core/llm/            single LLM egress · air-gap loopback check · model identi
 core/risk/           authority ceiling (AUTO / HITL / HOTL / BLOCK)
 core/seal/           detached CROSS-3 receipt (model + ceiling + bundle hash)
 core/promote/        Phase 2 approval gate G1–G5 + HMAC tokens + connectors (dry-run default)
-evidence/            bundler · sha256 integrity · detached Ed25519 seal · 11-framework crosswalk · PDF
+evidence/            bundler · sha256 integrity · OSCAL AR · CAB one-pager · 11-framework crosswalk · PDF
 ui/                  self-contained PreFlight dashboard
 serve.py             standalone community server (sim tier)
 docs/                ARCHITECTURE.md · COMPLIANCE.md · DEVELOPER.md · EVIDENCE.md · GO_LIVE.md

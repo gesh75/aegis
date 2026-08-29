@@ -48,11 +48,11 @@ What Batfish / Forward Networks / NetPilot do that AEGIS doesn't yet:
 | **Declarative intent checks in git** | Forward intent checks re-run per snapshot; Batfish `assert_*` gating CI | YAML assertion DSL versioned next to configs; exit codes + JUnit output for pipelines |
 | **Model-fidelity reporting** | Batfish `initIssues`/parse-warning transparency — its biggest trust win | Report parse %, unsupported lines per snapshot; treat low fidelity as a finding, never silently drop config |
 | **Evidence-cited findings** | Forward cites "the path, policy, or config line that proves it" | Every pass/fail row links to config file + line + computed path (AEGIS partially does; make universal) |
-| **OSCAL Assessment Results export** | FedRAMP-mandated; Vanta/Drata converging via OSCAL-COMPASS | Emit OSCAL AR JSON alongside HTML/PDF — strong differentiator for the 11-framework story |
+| **OSCAL Assessment Results export** | FedRAMP-mandated; Vanta/Drata converging via OSCAL-COMPASS | **Shipped (shaped, honest):** `evidence/oscal.py` + `POST /api/preflight/evidence/oscal`. AEGIS-shaped AR JSON, not a FedRAMP package. CAB one-pager shipped alongside. |
 | **Hash-chained run log + RFC 3161** | Chain-of-custody best practice (FRE 901/902) | Append-only hash-chained collection log; observation-window stamps (SOC 2 Type II provability) |
 | **Cross-framework control-mapping matrix as artifact** | Vanta/Drata 80-90% effort reduction claims | Emit the one-check→N-controls matrix in every bundle (AEGIS has the mapping; surface it) |
 | **Emulation tier for convergence/failover** | NetPilot ~2-min sandbox on real NOS images | Optional containerlab tier (cEOS/cRPD/SR Linux) when static analysis isn't enough |
-| **CAB-ready change report** | NetPilot pre/post + rollback-verified report | One-page CAB export: what changed, which intents still hold, rollback plan verified |
+| **CAB-ready change report** | NetPilot pre/post + rollback-verified report | **Shipped (honest):** `evidence/cab.py` + `POST /api/preflight/evidence/cab`. What changed, which intents still hold, rollback *plan*. `rollback.verified_in_twin` is always false — reversal was not executed. |
 
 Strategic note: AEGIS's defensible position is **compliance-evidence + air-gap**, not simulation. Embed Batfish for depth; invest original engineering in evidence integrity (after Tier 0/1 fixes — the evidence layer must actually be trustworthy first).
 

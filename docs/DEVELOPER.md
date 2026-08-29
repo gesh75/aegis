@@ -130,6 +130,8 @@ The seal (`core/seal/seal.py`) additionally refuses to certify an unbounded chan
 | GET | `/api/status` | Public. `{api_auth, approve_hmac, seal, egress}` — no secrets. |
 | POST | `/api/preflight/run` | `mode=live` → **501**. Sim only. Auth when `AEGIS_API_KEY` set. |
 | POST | `/api/preflight/evidence/pdf` | Integrity must verify or **422**. Auth when key set. |
+| POST | `/api/preflight/evidence/oscal` | OSCAL-shaped AR JSON. Same integrity gate. Not FedRAMP. |
+| POST | `/api/preflight/evidence/cab` | CAB one-pager. Rollback is a plan, not a verified execution. |
 | POST | `/api/approve/mint` | HMAC token bound to `bundle_sha256`. **503** if HMAC unset. |
 | POST | `/api/preflight/promote` | Gate G1–G5 then dry-run (default). **403** on deny. |
 | GET | `/api/seal/pubkey` | Offline verify material (public). |
@@ -141,7 +143,7 @@ CSP is loopback-oriented; `MAX_CONTENT_LENGTH` is 2 MB.
 
 ## 6. Tests you can run locally
 
-CI (`.github/workflows/test.yml`) runs seven modules. These extra suites are **not** in
+CI (`.github/workflows/test.yml`) runs nine modules. These extra suites are **not** in
 that workflow and are the right place to lock air-gap / authority / seal behavior:
 
 ```bash
