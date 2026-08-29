@@ -480,6 +480,7 @@
         <a href="#overview">Overview</a>
         <a href="#features">Features</a>
         <a href="#architecture">Architecture</a>
+        <a href="https://github.com/gesh75/aegis/blob/main/docs/EVIDENCE.md" target="_blank" rel="noopener">Evidence runbook ↗</a>
         <a href="#dataflow">Data Flow</a>
         <a href="#stack">Tech Stack</a>
         <a href="#components">Components</a>
@@ -689,7 +690,7 @@
       <div class="hero-copy">
         <div class="hero-badges reveal">
           <span class="pill">Apache-2.0</span>
-          <span class="pill">v0.1.0 · Phase 2</span>
+          <span class="pill">v0.2.0 · Phase 2 closed</span>
           <span class="pill">egress <b>none</b></span>
           <span class="pill">Python 3.10+</span>
         </div>
@@ -702,7 +703,8 @@
           <div class="stat-chip reveal" role="listitem"><span class="num" data-count="8">0</span><span class="lbl">invariants</span></div>
           <div class="stat-chip reveal" role="listitem"><span class="num" data-count="0">0</span><span class="lbl">violations</span></div>
           <div class="stat-chip reveal" role="listitem"><span class="num" data-count="2000">0</span><span class="lbl">concurrent runs</span></div>
-          <div class="stat-chip reveal" role="listitem"><span class="num" data-count="6">0</span><span class="lbl">test suites</span></div>
+          <div class="stat-chip reveal" role="listitem"><span class="num" data-count="7">0</span><span class="lbl">CI suites</span></div>
+          <div class="stat-chip reveal" role="listitem"><span class="num" data-count="11">0</span><span class="lbl">frameworks</span></div>
           <div class="stat-chip reveal" role="listitem"><span class="num" data-count="52" data-suffix="k">0</span><span class="lbl">cmd corpus</span></div>
         </div>
 
@@ -726,11 +728,12 @@
         <aside class="side-card glass reveal" aria-label="At a glance">
           <h3>At a glance</h3>
           <div class="kv"><span class="k">Codename</span><span class="v">Evidence-Grade Inspection</span></div>
-          <div class="kv"><span class="k">Version</span><span class="v">v0.1.0 (2026-05-28)</span></div>
-          <div class="kv"><span class="k">Phase</span><span class="v">Phase 2</span></div>
+          <div class="kv"><span class="k">Version</span><span class="v">v0.2.0 (2026-06-12)</span></div>
+          <div class="kv"><span class="k">Phase</span><span class="v">Phase 2 closed · Phase 3</span></div>
           <div class="kv"><span class="k">License</span><span class="v">Apache-2.0</span></div>
           <div class="kv"><span class="k">Only AI dep</span><span class="v">Self-hosted Qwen3</span></div>
-          <div class="kv"><span class="k">Integrity seal</span><span class="v seal">sha256</span></div>
+          <div class="kv"><span class="k">Integrity</span><span class="v seal">sha256</span></div>
+          <div class="kv"><span class="k">Authenticity</span><span class="v seal">Ed25519</span></div>
           <div class="kv"><span class="k">Egress</span><span class="v seal">none</span></div>
         </aside>
       </div>
@@ -748,7 +751,7 @@
     <section id="architecture" aria-labelledby="arch-h">
       <span class="eyebrow reveal">Architecture</span>
       <h2 class="section-title reveal" id="arch-h">Inside the perimeter</h2>
-      <p class="section-lead reveal">Everything runs inside an air-gapped perimeter. The operator submits a change, a self-hosted Qwen3 proposes config, a throwaway containerlab twin verifies it, and an auditor consumes the sealed PDF — no actor or line ever reaches outside the wall. The codebase splits into four layers: an orchestrator that drives the loop, backends that abstract where work runs, evidence that seals and renders the output, and a promote layer that gates a verified bundle toward production.</p>
+      <p class="section-lead reveal">Everything runs inside an air-gapped perimeter. The operator submits a change, a self-hosted Qwen3 proposes config, a throwaway containerlab twin verifies it, and an auditor consumes the sealed PDF — no actor or line ever reaches outside the wall. The codebase splits into layers: an orchestrator that drives the loop, backends that abstract where work runs, llm/risk/seal that bound autonomy, evidence that hashes and renders the output, and a promote layer (G1–G5) that gates a verified bundle toward production.</p>
 
       <div class="diagram-cols">
         <div class="diagram-block glass mermaid-wrap reveal">
@@ -798,12 +801,13 @@
         HTTP["http_backend.py :5757"]:::svc
     end
     subgraph EVID["evidence"]
-        BUND["bundler.py sha256 seal"]:::data
+        BUND["bundler.py sha256 digest"]:::data
         COMP["compliance.py crosswalk"]:::accent
         PDF["pdf.py examiner PDF"]:::accent
+        SEAL["core/seal.py Ed25519"]:::accent
     end
     subgraph PROM["core/promote"]
-        GATE["gate.py G1-G4"]:::accent
+        GATE["gate.py G1-G5"]:::accent
         CONN["connectors.py DryRun"]:::edge
     end
     UI --> PIPE
@@ -814,6 +818,7 @@
     PIPE --> COMP
     PIPE --> ROLL
     PIPE --> BUND
+    BUND --> SEAL
     BUND --> PDF
     BUND --> GATE
     GATE --> CONN
@@ -854,16 +859,17 @@
         Pipe->>B: spawn_twin + apply_and_converge
         Pipe->>B: state_diff routes and sessions
         Pipe->>G: risk_tier + approval_required
-        Pipe->>Ev: build_bundle sha256 seal, egress none
+        Pipe->>Ev: build_bundle sha256 digest, egress none
         Note over Pipe,B: finally teardown_twin always
-        Ev-->>Srv: sealed JSON bundle
-        Srv-->>Op: bundle plus optional PDF
+        Ev-->>Srv: hash-valid JSON bundle
+        Srv-->>Srv: seal_response if bounded
+        Srv-->>Op: bundle + optional PDF (hash check only)
     end</pre>
       </div>
 
       <div class="diagram-block glass mermaid-wrap reveal">
         <div class="diagram-title">Verdict &amp; Promotion-Gate Decision Tree <span class="tag">stateDiagram-v2</span></div>
-        <p class="diagram-desc">The verdict resolves to blocked, needs_approval, or ship_ready from batfish errors, twin convergence, and BGP regression; a promotable bundle then passes the four-rule Phase 2 gate, dry-run by default.</p>
+        <p class="diagram-desc">The verdict resolves to blocked, needs_approval, or ship_ready from batfish errors, twin convergence, and BGP regression; a promotable bundle then passes the five-rule Phase 2 gate (including G5 ceiling), dry-run by default.</p>
         <pre class="mermaid">stateDiagram-v2
     [*] --> Verdict
     Verdict --> Blocked: batfish errors or BGP regression
@@ -874,11 +880,12 @@
     ShipReady --> Gate
     state Gate {
         [*] --> G1
-        G1 --> G2: integrity re-verified
+        G1 --> G2: hash integrity re-verified
         G2 --> G3: verdict promotable
         G3 --> G4: approval token valid
-        G4 --> DryRun: safe default
-        G4 --> Live: explicit opt-in
+        G4 --> G5: live opt-in + ceiling
+        G5 --> DryRun: safe default
+        G5 --> Live: explicit opt-in
     }
     Gate --> Record: sealed promotion record
     Record --> [*]</pre>
@@ -948,12 +955,14 @@ docker compose -f docker-compose.yml -f docker-compose.airgap.yml up  # network_
             <button class="copy-btn" type="button" data-copy="python -m aegis.tests.stress_test 25000      # pipeline invariants (8, adversarial)
 python -m aegis.tests.contract_test          # HttpBackend parsers vs real :5757 shapes
 python -m aegis.tests.pdf_test               # evidence PDF validity
-python -m aegis.tests.promote_test           # Phase 2 approval-gate safety">Copy</button>
+python -m aegis.tests.promote_test           # Phase 2 gate G1–G5
+python -m aegis.tests.compliance_test        # 11-framework self-tests">Copy</button>
           </div>
           <pre class="code"><span class="cmd">python -m aegis.tests.stress_test 25000</span>      <span class="cmt"># pipeline invariants (8, adversarial)</span>
 <span class="cmd">python -m aegis.tests.contract_test</span>          <span class="cmt"># HttpBackend parsers vs :5757 shapes</span>
 <span class="cmd">python -m aegis.tests.pdf_test</span>               <span class="cmt"># evidence PDF validity</span>
-<span class="cmd">python -m aegis.tests.promote_test</span>           <span class="cmt"># Phase 2 approval-gate safety</span></pre>
+<span class="cmd">python -m aegis.tests.promote_test</span>           <span class="cmt"># Phase 2 gate G1–G5</span>
+<span class="cmd">python -m aegis.tests.compliance_test</span>        <span class="cmt"># 11-framework self-tests</span></pre>
         </div>
       </div>
     </section>
@@ -980,7 +989,7 @@ python -m aegis.tests.promote_test           # Phase 2 approval-gate safety">Cop
         <a href="#components">Components</a>
       </div>
     </div>
-    <p class="footer-note">Auto-generated documentation · single-page, self-contained, air-gap safe. The community core is open-source (Apache-2.0); live production-push connectors, RBAC, and hosted multi-tenant compute are the commercial tier.</p>
+    <p class="footer-note">Auto-generated documentation · single-page, self-contained, air-gap safe. v0.2.0 community core (Apache-2.0). SHA-256 is integrity; Ed25519 is authenticity — see docs/EVIDENCE.md. Live production-push connectors, RBAC, and hosted multi-tenant compute are the commercial tier.</p>
   </footer>
 
   <button type="button" class="to-top" id="toTop" aria-label="Back to top">↑</button>
@@ -993,10 +1002,10 @@ python -m aegis.tests.promote_test           # Phase 2 approval-gate safety">Cop
       { icon: "🛡️", title: "Guarded-agentic loop", description: "Only generate_config touches an LLM; every step after the proposal — static analysis, twin spawn/converge, diff, compliance, risk tiering, rollback, verdict — is deterministic verification, which is what makes the evidence auditable." },
       { icon: "🧪", title: "Real on-host digital twin", description: "A throwaway, namespaced containerlab twin (srlinux / ceos / frr / junos / ios / panos) verifies the change with live BGP/EVPN convergence — real emulation, not a cloud math model, and always torn down in a finally block." },
       { icon: "🔒", title: "Zero egress, fully air-gapped", description: "A self-hosted Qwen3 LLM is the only AI dependency; networking is urllib-only with no external DNS, and integrity.egress is hard-pinned to none. An offline install carries a signed docker tar across the gap and runs network_mode:none." },
-      { icon: "📜", title: "Sealed, examiner-ready evidence", description: "Each run produces a JSON-Schema-validated bundle with a reproducible sha256 integrity seal and a PCI-DSS v4 / SOC 2 / NIST 800-53 control crosswalk, rendered to an A4 PDF a regulated buyer hands straight to an auditor." },
+      { icon: "📜", title: "Sealed, examiner-ready evidence", description: "Each run produces a JSON-Schema-validated bundle: integrity.sha256 is a self-consistency digest (seal excluded). Origin proof is a detached Ed25519 receipt verified at /api/seal/verify (G0–G6). The A4 PDF is a printer — it re-checks the hash only, not the signature." },
       { icon: "🔌", title: "Pluggable backend Protocol", description: "A single six-method Backend Protocol lets the identical pipeline run in an in-process SimulatorBackend (CI / community tier) or against the in-perimeter HttpBackend :5757 live stack." },
       { icon: "📋", title: "Config-import path", description: "Paste a sanitized running-config instead of an NL intent — the most auditable mode, because no LLM is in the loop at all, only deterministic verification." },
-      { icon: "🚦", title: "Phase 2 promotion gate", description: "A deterministic four-rule gate (G1 integrity, G2 verdict, G3 risk, G4 live opt-in) decides whether a sealed bundle reaches production; the only default connector is a dry-run that mutates nothing." },
+      { icon: "🚦", title: "Phase 2 promotion gate", description: "A deterministic five-rule gate (G1 hash integrity, G2 verdict, G3 risk, G4 live opt-in, G5 autonomy ceiling) decides whether a bundle reaches production; the only default connector is a dry-run that mutates nothing. Promote G1 is the content hash, not verify_seal." },
       { icon: "📊", title: "Adversarially stress-proven", description: "25,000 randomized + adversarial runs and 2,000 concurrent runs hold 8 invariants with zero violations — never ships an unsafe change, never leaks a twin, always pins egress to none." }
     ];
 
@@ -1009,17 +1018,17 @@ python -m aegis.tests.promote_test           # Phase 2 approval-gate safety">Cop
       "Backend.state_diff captures before/after routes and dropped sessions to compute blast radius",
       "compliance.map_controls crosswalks the result to PCI-DSS/SOC2/NIST controls; guards.risk_tier assigns low/medium/high and approval_required",
       "rollback.build_rollback_plan derives the reverse plan; _verdict resolves to blocked / needs_approval / ship_ready",
-      "bundler.build_bundle assembles the record, computes the sha256 seal over canonical JSON, and pins integrity.egress to none",
-      "teardown_twin runs in a finally block so no throwaway twin leaks; the sealed JSON bundle (and optional PDF) returns to the operator/auditor",
-      "A ship_ready or approved bundle may pass the Phase 2 gate (G1-G4) and reach a connector — DryRunConnector by default, a live push only on explicit opt-in"
+      "bundler.build_bundle assembles the record, computes integrity.sha256 over canonical JSON (seal popped), and pins integrity.egress to none",
+      "teardown_twin runs in a finally block so no throwaway twin leaks; serve.py attaches a detached Ed25519 seal when the change is bounded, then returns the JSON (PDF is a later render)",
+      "A ship_ready or approved bundle may pass the Phase 2 gate (G1–G5) and reach a connector — DryRunConnector by default, a live push only on explicit opt-in. Examiner authenticity is POST /api/seal/verify, not the PDF route."
     ];
 
     const techStack = [
       "Python 3.10+ (pure-stdlib core)", "typing.Protocol backends", "Flask 3.x (loopback, strict CSP, 2 MB cap)",
       "Self-hosted Qwen3 LLM", "OpenAI-compatible /v1/chat/completions", "containerlab + Docker twin",
-      "srlinux · ceos · frr · junos · ios · panos", "Batfish-style static analysis (:5757)", "hashlib sha256 seal",
-      "canonical JSON", "JSON Schema draft-07", "jsonschema 3.2.0", "reportlab A4 PDF (air-gap safe)",
-      "urllib only (no external DNS)", "docker-compose airgap (network_mode:none)", "GitHub Actions CI (6 suites)"
+      "srlinux · ceos · frr · junos · ios · panos", "Batfish-style static analysis (:5757)", "hashlib sha256 integrity",
+      "detached Ed25519 CROSS-3 seal", "canonical JSON", "JSON Schema draft-07", "jsonschema 3.2.0", "reportlab A4 PDF (air-gap safe)",
+      "urllib only (no external DNS)", "docker-compose airgap (network_mode:none)", "GitHub Actions CI (7 suites)"
     ];
 
     const components = [
@@ -1028,13 +1037,14 @@ python -m aegis.tests.promote_test           # Phase 2 approval-gate safety">Cop
       { name: "core/backends/base.py", responsibility: "The Backend Protocol — the guarded-agentic boundary. Declares six operations (generate_config, batfish_check, spawn_twin, apply_and_converge, state_diff, teardown_twin) and TypedDicts for results. Only generate_config touches an LLM.", tech: "typing.Protocol · TypedDict · runtime_checkable" },
       { name: "core/backends/simulator.py", responsibility: "SimulatorBackend: in-process, seeded-off-intent, failure-injecting implementation with zero external deps. Same intent yields identical bundle for reproducible, testable invariants. Powers CI and the community sim tier.", tech: "hashlib-seeded random · pure Python" },
       { name: "core/backends/http_backend.py", responsibility: "HttpBackend: adapts AEGIS to the in-perimeter DCN_Network_Tool :5757 stack and a self-hosted Qwen3 model-runner. Parsing split into pure parse_* functions so they can be contract-tested with no network.", tech: "urllib only · no external DNS" },
-      { name: "evidence/bundler.py", responsibility: "Assembles the evidence bundle and seals it: build_bundle() composes change/twin/validation/rollback/verdict/integrity, compute_sha256() hashes the canonical JSON with the hash field blanked, and integrity.egress is hard-pinned to none.", tech: "hashlib sha256 · canonical JSON" },
-      { name: "evidence/compliance.py", responsibility: "Deterministic control crosswalk: map_controls() maps a verified change to PCI-DSS v4 (1.2.1, 8.3.1), SOC 2 (CC8.1), and NIST 800-53 (CM-3, CM-6) controls with pass/fail status and evidence text.", tech: "Python dict rules · dep-free" },
-      { name: "evidence/pdf.py", responsibility: "render_pdf() turns a sealed bundle into the examiner-ready A4 PDF a regulated buyer hands an auditor — verdict, twin outcome, framework-mapped controls, generated config + grounding, rollback plan, and the sha256/egress integrity block.", tech: "reportlab platypus · air-gap safe" },
+      { name: "evidence/bundler.py", responsibility: "Assembles the evidence bundle and computes integrity.sha256: build_bundle() composes change/twin/validation/rollback/verdict/integrity, compute_sha256() hashes canonical JSON with the hash field blanked and seal popped, and integrity.egress is hard-pinned to none. This digest is self-consistency, not a signature.", tech: "hashlib sha256 · canonical JSON" },
+      { name: "evidence/compliance.py", responsibility: "Deterministic control crosswalk: map_controls() plus an auto-discovered registry of 11 framework modules. PCI-DSS v4 includes 1.2.1 and 8.3.2 (strong crypto for auth — the 0.2.0 id, not 8.3.1).", tech: "per-framework modules · ComplianceSignal" },
+      { name: "evidence/pdf.py", responsibility: "render_pdf() turns a hash-valid bundle into an A4 PDF — verdict, twin, controls, config, rollback, sha256/egress, and (if present) unverified seal claim text. The HTTP wrapper re-checks bundler.verify only; it does not call verify_seal.", tech: "reportlab platypus · air-gap safe" },
       { name: "evidence/schema/evidence_bundle.schema.json", responsibility: "The JSON Schema (draft-07) every emitted evidence bundle is validated against — the structural contract the stress test checks 25,000 times with zero failures.", tech: "JSON Schema draft-07 · jsonschema 3.2.0" },
-      { name: "core/promote/gate.py", responsibility: "Phase 2 approval gate: evaluate() applies four deterministic rules — G1 integrity re-verify, G2 verdict promotability, G3 medium/high risk needs approver+token, G4 live connector needs explicit opt-in — returning a frozen GateDecision.", tech: "frozen dataclass · pure function" },
+      { name: "core/promote/gate.py", responsibility: "Phase 2 approval gate: evaluate() applies five deterministic rules — G1 bundler.verify, G2 verdict, G3 medium/high risk needs approver+token, G4 live connector needs AEGIS_PROMOTE_ALLOW_LIVE=1, G5 re-derives the autonomy ceiling. Returns a frozen GateDecision. Does not call verify_seal.", tech: "frozen dataclass · pure function" },
       { name: "core/promote/connectors.py", responsibility: "Production-push connectors. DryRunConnector (default, live=False) records what would be pushed and mutates nothing; a live connector is an inert opt-in extension point behind the ProdConnector Protocol.", tech: "typing.Protocol · dry-run by default" },
-      { name: "serve.py", responsibility: "Standalone community sim-tier Flask server. Serves the PreFlight UI at /preflight, runs the pipeline via SimulatorBackend on POST /api/preflight/run, and emits PDFs on /api/preflight/evidence/pdf. Loopback-bound, strict CSP, 2 MB body cap, rejects live mode (501).", tech: "Flask 3.x · CSP headers" },
+      { name: "core/seal/seal.py", responsibility: "CROSS-3 detached receipt: seal_bundle signs model identity + authority ceiling + bundle_sha256 with a pinned key. verify_seal runs gates G0–G6 offline against the public key only. Unbounded changes are refused (SealError / seal: null).", tech: "Ed25519 · cryptography" },
+      { name: "serve.py", responsibility: "Community sim-tier Flask server. /preflight UI; POST /api/preflight/run (SimulatorBackend; mode=live → 501) attaches seal_response; POST /api/preflight/evidence/pdf re-checks the sha256 only; GET /api/seal/pubkey and POST /api/seal/verify are the authenticity path. Loopback-bound, strict CSP, 2 MB cap. Invalid AEGIS_SEAL_KEY is SystemExit.", tech: "Flask 3.x · CSP headers" },
       { name: "ui/preflight_screen.html", responsibility: "Self-contained single-file PreFlight dashboard: type an intent or paste a config, run preflight, watch the verdict + sealed evidence bundle, and download the examiner-ready PDF. No external assets.", tech: "inline HTML/CSS/JS · single asset" }
     ];
 

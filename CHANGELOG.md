@@ -9,6 +9,9 @@ Post-0.2.0 hardening that landed on `main` after the 0.2.0 tag. Documented here 
 operators can see fail-closed behavior that is already in the code.
 
 ### Fixed
+- **Fail-closed Idle BGP / empty apply / empty configgen** (#17): Nornir `status==ok`
+  no longer invents a session. Idle or empty results never converge. Twin-apply requires
+  `applied: true`. Empty/blank LLM `configs` raise `generation_failed`.
 - **DISA STIG peer binding**: CISC-RT-000480 / CISC-RT-000050 require authentication on
   the actual `neighbor` (or IGP interface). A leftover `key chain` / HMAC token in the
   same file no longer produces a pass.
@@ -26,6 +29,12 @@ operators can see fail-closed behavior that is already in the code.
 
 ### Docs
 - Live architecture page no longer loads remote Mermaid from a CDN (air-gap safe).
+- **Evidence runbook** (`docs/EVIDENCE.md`): `integrity.sha256` is self-consistency;
+  the detached Ed25519 receipt is origin + ceiling proof. Documents that
+  `POST /api/preflight/evidence/pdf` calls `bundler.verify` only (not `verify_seal`),
+  plus the auditor path (`/api/seal/pubkey`, `/api/seal/verify`, G0–G6).
+- Pages (`docs/index.html`) now advertises **v0.2.0**, G1–G5, 7 CI suites, 11 frameworks,
+  and does not call the content hash a seal.
 
 ## [0.2.0] — 2026-06-12
 
@@ -44,8 +53,12 @@ quality, compliance-domain, API/UI lenses) — see `docs/IMPROVEMENT_PLAN_2026-0
 - Missing runtime dependency `httpx` added to requirements.txt; `/favicon.ico` 404 noise.
 
 ### Security
-- **Evidence PDF endpoint verifies bundle integrity** before rendering — a tampered or
-  forged bundle is rejected with 422 instead of becoming an "examiner-ready" artifact.
+- **Evidence PDF endpoint verifies the bundle sha256** before rendering — a body whose
+  fields no longer match `integrity.sha256` is rejected with 422. That check is
+  self-consistency, not origin authentication: a client that computes the public hash
+  over invented content still gets a PDF. Cryptographic authenticity is
+  `POST /api/seal/verify` / `verify_seal` (G0–G6 against the pinned key). See
+  `docs/EVIDENCE.md`.
 - **Seal key fails closed**: an invalid `AEGIS_SEAL_KEY` now refuses to start instead of
   silently degrading to an ephemeral key.
 - **LLM output fails closed**: unparseable generation raises `generation_failed` instead

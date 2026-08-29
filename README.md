@@ -18,7 +18,8 @@
 [![tests](https://github.com/gesh75/aegis/actions/workflows/test.yml/badge.svg)](https://github.com/gesh75/aegis/actions/workflows/test.yml)
 [![python](https://img.shields.io/badge/python-3.10%2B-3776ab.svg)](#)
 [![egress](https://img.shields.io/badge/egress-none-2ea44f.svg)](#)
-[![status](https://img.shields.io/badge/status-Phase_2-8a5cf6.svg)](docs/PHASES.md)
+[![status](https://img.shields.io/badge/status-v0.2.0-8a5cf6.svg)](docs/PHASES.md)
+[![phase](https://img.shields.io/badge/phase-2_closed-2ea44f.svg)](docs/PHASES.md)
 
 The air-gapped, self-hosted answer to Forward Predict / NetPilot: those are
 cloud-by-architecture, so regulated networks that legally cannot send topology/config
@@ -116,9 +117,12 @@ pip install -r requirements.txt
 python -m aegis.serve             # from the directory ABOVE aegis/
 ```
 
-Type a change (or paste a config), Run PreFlight, watch the verdict + sealed evidence
-bundle, and download the examiner-ready PDF. Live mode (real Qwen3 + containerlab twin)
-ships in the integrated air-gapped product — see [`docs/GO_LIVE.md`](docs/GO_LIVE.md).
+Type a change (or paste a config), Run PreFlight, watch the verdict + evidence
+bundle, and download the examiner-ready PDF. The PDF is a rendering of a self-consistent
+bundle — before handing it to an examiner, verify the detached Ed25519 receipt
+(`POST /api/seal/verify`) against the pinned key. See [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
+Live mode (real Qwen3 + containerlab twin) ships in the integrated air-gapped product —
+see [`docs/GO_LIVE.md`](docs/GO_LIVE.md).
 
 ### Air-gapped install (zero egress)
 
@@ -163,10 +167,10 @@ core/llm/            single LLM egress · air-gap loopback check · model identi
 core/risk/           authority ceiling (AUTO / HITL / HOTL / BLOCK)
 core/seal/           detached CROSS-3 receipt (model + ceiling + bundle hash)
 core/promote/        Phase 2 approval gate G1–G5 + connectors (dry-run default)
-evidence/            bundler · sha256 seal · 11-framework crosswalk · PDF · JSON schema
+evidence/            bundler · sha256 integrity · detached Ed25519 seal · 11-framework crosswalk · PDF
 ui/                  self-contained PreFlight dashboard
 serve.py             standalone community server (sim tier)
-docs/                ARCHITECTURE.md · COMPLIANCE.md · DEVELOPER.md · GO_LIVE.md
+docs/                ARCHITECTURE.md · COMPLIANCE.md · DEVELOPER.md · EVIDENCE.md · GO_LIVE.md
 ```
 
 ## Project history & roadmap
@@ -176,6 +180,7 @@ evidence PDF → config-import → mgmt isolation → packaging → Phase 2 prom
 logged in [`docs/PHASES.md`](docs/PHASES.md). Changelog: [`CHANGELOG.md`](CHANGELOG.md).
 Developer pitfalls (air-gap URLs, IPv6 BGP parser, DISA peer binding, seal key):
 [`docs/DEVELOPER.md`](docs/DEVELOPER.md).
+Auditor verify runbook (sha256 vs Ed25519): [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
 
 ## License
 
