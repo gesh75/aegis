@@ -3,6 +3,30 @@
 All notable changes to AEGIS. Format follows [Keep a Changelog](https://keepachangelog.com);
 versioning is [SemVer](https://semver.org).
 
+## [Unreleased]
+
+Post-0.2.0 hardening that landed on `main` after the 0.2.0 tag. Documented here so
+operators can see fail-closed behavior that is already in the code.
+
+### Fixed
+- **DISA STIG peer binding**: CISC-RT-000480 / CISC-RT-000050 require authentication on
+  the actual `neighbor` (or IGP interface). A leftover `key chain` / HMAC token in the
+  same file no longer produces a pass.
+- **IPv6 BGP session count** (`http_backend.parse_nornir_bgp`): peer rows now match IPv4
+  **and** IPv6 neighbor addresses. Established = numeric `PfxRcd` or `Estab*`. The
+  contract fixture (`NORNIR_IPV6`) expects two IPv6 Established sessions.
+- **IPv6 parser ReDoS**: a malformed flood of `:` no longer hangs the parser; the
+  contract suite treats it as zero sessions (`bgp_up == 0`).
+
+### Security
+- **Air-gap LLM URLs**: `is_loopback` rejects mDNS `.local` and any non-literal hostname.
+  Only `127.0.0.0/8`, `::1`, `localhost`, and `ip6-localhost` are trusted. No DNS lookup.
+- **CI workflow tokens**: `permissions: contents: read` and
+  `persist-credentials: false` on checkout.
+
+### Docs
+- Live architecture page no longer loads remote Mermaid from a CDN (air-gap safe).
+
 ## [0.2.0] — 2026-06-12
 
 Hardening release driven by a 16-agent adversarially-verified review (security,

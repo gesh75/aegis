@@ -129,35 +129,44 @@ docker load -i aegis-local.tar
 docker compose -f docker-compose.yml -f docker-compose.airgap.yml up  # network_mode: none
 ```
 
-## Test — 6 suites, 0 violations
+## Test — 7 CI suites, 0 violations
 
 ```bash
 pip install -r requirements.txt
 python -m aegis.tests.stress_test 25000      # pipeline invariants (8 invariants, adversarial)
 python -m aegis.tests.contract_test          # HttpBackend parsers vs real :5757 shapes
 python -m aegis.tests.pdf_test               # evidence PDF validity
-python -m aegis.tests.promote_test           # Phase 2 approval-gate safety
+python -m aegis.tests.promote_test           # Phase 2 approval-gate safety (G1–G5)
+python -m aegis.tests.compliance_test        # 11-framework self-tests + schema-valid bundle
 ```
 
-| Suite | Scale | Result |
+| Suite | Scale | In CI |
 |---|---|---|
-| pipeline invariants | 25,000 runs | ✅ PASS |
-| HttpBackend contract | real API shapes | ✅ PASS |
-| evidence PDF | 1,500 bundles | ✅ PASS |
-| promotion gate | 6,000 bundles | ✅ PASS |
-| Flask test-client | 10 tests | ✅ PASS |
-| twin safety + mgmt isolation | 8,000 ops | ✅ PASS |
+| pipeline invariants | 25,000 runs | yes |
+| HttpBackend contract | real API shapes (incl. IPv6 BGP + fail-closed generation) | yes |
+| evidence PDF | 1,500 bundles | yes |
+| promotion gate | 6,000 bundles | yes |
+| Flask test-client | 10 tests | yes |
+| twin safety + mgmt isolation | 8,000 ops | yes |
+| compliance frameworks | per-module `SELF_TEST` | yes |
+
+Local-only property suites (not in `.github/workflows/test.yml`): `llm_egress_test`,
+`authority_test`, `ceiling_test`, `seal_test`, `wedge_test`. See
+[`docs/DEVELOPER.md`](docs/DEVELOPER.md).
 
 ## Layout
 
 ```
 core/orchestrator/   deterministic pipeline · guards · rollback
 core/backends/       pluggable: simulator (CI) | http (live :5757)
-core/promote/        Phase 2 approval gate + connectors (dry-run default)
-evidence/            bundler · sha256 seal · compliance crosswalk · PDF · JSON schema
+core/llm/            single LLM egress · air-gap loopback check · model identity
+core/risk/           authority ceiling (AUTO / HITL / HOTL / BLOCK)
+core/seal/           detached CROSS-3 receipt (model + ceiling + bundle hash)
+core/promote/        Phase 2 approval gate G1–G5 + connectors (dry-run default)
+evidence/            bundler · sha256 seal · 11-framework crosswalk · PDF · JSON schema
 ui/                  self-contained PreFlight dashboard
 serve.py             standalone community server (sim tier)
-docs/                PHASES.md · GO_LIVE.md · architecture.svg
+docs/                ARCHITECTURE.md · COMPLIANCE.md · DEVELOPER.md · GO_LIVE.md
 ```
 
 ## Project history & roadmap
@@ -165,6 +174,8 @@ docs/                PHASES.md · GO_LIVE.md · architecture.svg
 Every phase — research → positioning → scaffold → live adapters → twin endpoints → UI →
 evidence PDF → config-import → mgmt isolation → packaging → Phase 2 promotion gate — is
 logged in [`docs/PHASES.md`](docs/PHASES.md). Changelog: [`CHANGELOG.md`](CHANGELOG.md).
+Developer pitfalls (air-gap URLs, IPv6 BGP parser, DISA peer binding, seal key):
+[`docs/DEVELOPER.md`](docs/DEVELOPER.md).
 
 ## License
 
