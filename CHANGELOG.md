@@ -22,6 +22,17 @@ operators can see fail-closed behavior that is already in the code.
   contract suite treats it as zero sessions (`bgp_up == 0`).
 
 ### Security
+- **HMAC-signed approval tokens** (T1 #9): when `AEGIS_APPROVE_KEY` is set, G2/G3 require
+  an `aegis1.<payload>.<mac>` token bound to the bundle sha256, the approver, and an
+  expiry. A random non-empty string is a deny. Unset key stays the honesty tier
+  (`asserted-unverified`) so community tests and air-gap demos keep working. Promotion
+  records store `approval.method` + `approval.token_sha256` — never the raw token.
+  `POST /api/approve/mint` and `POST /api/preflight/promote` are now on the community
+  server.
+- **API-key header** (T1 #10): when `AEGIS_API_KEY` is set, mutating routes require
+  `X-Aegis-Key` (constant-time compare). A pinned `AEGIS_SEAL_KEY` without an API key
+  refuses to start — unauthenticated deploys never mint pinned-key seals. Public:
+  `/api/status`, `/api/seal/pubkey`, `/api/seal/verify`.
 - **Air-gap LLM URLs**: `is_loopback` rejects mDNS `.local` and any non-literal hostname.
   Only `127.0.0.0/8`, `::1`, `localhost`, and `ip6-localhost` are trusted. No DNS lookup.
 - **CI workflow tokens**: `permissions: contents: read` and

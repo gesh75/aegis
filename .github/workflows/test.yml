@@ -42,6 +42,9 @@ jobs:
       - name: HttpBackend contract (parsers vs real :5757 shapes)
         run: python -m aegis.tests.contract_test
 
+      - name: HMAC approval tokens (T1 #9)
+        run: python -m aegis.tests.tokens_test
+
       - name: Flask endpoints (sim-tier server, test-client)
         run: python -m aegis.tests.api_test
 

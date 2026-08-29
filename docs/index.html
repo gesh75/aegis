@@ -1005,7 +1005,7 @@ python -m aegis.tests.compliance_test        # 11-framework self-tests">Copy</bu
       { icon: "📜", title: "Sealed, examiner-ready evidence", description: "Each run produces a JSON-Schema-validated bundle: integrity.sha256 is a self-consistency digest (seal excluded). Origin proof is a detached Ed25519 receipt verified at /api/seal/verify (G0–G6). The A4 PDF is a printer — it re-checks the hash only, not the signature." },
       { icon: "🔌", title: "Pluggable backend Protocol", description: "A single six-method Backend Protocol lets the identical pipeline run in an in-process SimulatorBackend (CI / community tier) or against the in-perimeter HttpBackend :5757 live stack." },
       { icon: "📋", title: "Config-import path", description: "Paste a sanitized running-config instead of an NL intent — the most auditable mode, because no LLM is in the loop at all, only deterministic verification." },
-      { icon: "🚦", title: "Phase 2 promotion gate", description: "A deterministic five-rule gate (G1 hash integrity, G2 verdict, G3 risk, G4 live opt-in, G5 autonomy ceiling) decides whether a bundle reaches production; the only default connector is a dry-run that mutates nothing. Promote G1 is the content hash, not verify_seal." },
+      { icon: "🚦", title: "Phase 2 promotion gate", description: "A deterministic five-rule gate (G1 hash integrity, G2 verdict, G3 risk, G4 live opt-in, G5 autonomy ceiling) decides whether a bundle reaches production. G2/G3 require an HMAC-SHA256 token bound to the bundle hash when AEGIS_APPROVE_KEY is set; otherwise the pair is recorded as asserted-unverified. Dry-run is the only default connector. Promote G1 is the content hash, not verify_seal." },
       { icon: "📊", title: "Adversarially stress-proven", description: "25,000 randomized + adversarial runs and 2,000 concurrent runs hold 8 invariants with zero violations — never ships an unsafe change, never leaks a twin, always pins egress to none." }
     ];
 
@@ -1020,7 +1020,7 @@ python -m aegis.tests.compliance_test        # 11-framework self-tests">Copy</bu
       "rollback.build_rollback_plan derives the reverse plan; _verdict resolves to blocked / needs_approval / ship_ready",
       "bundler.build_bundle assembles the record, computes integrity.sha256 over canonical JSON (seal popped), and pins integrity.egress to none",
       "teardown_twin runs in a finally block so no throwaway twin leaks; serve.py attaches a detached Ed25519 seal when the change is bounded, then returns the JSON (PDF is a later render)",
-      "A ship_ready or approved bundle may pass the Phase 2 gate (G1–G5) and reach a connector — DryRunConnector by default, a live push only on explicit opt-in. Examiner authenticity is POST /api/seal/verify, not the PDF route."
+      "A ship_ready or approved bundle may pass the Phase 2 gate (G1–G5) and reach a connector — DryRunConnector by default, a live push only on explicit opt-in. G2/G3 verify HMAC tokens when AEGIS_APPROVE_KEY is set. Examiner authenticity is POST /api/seal/verify, not the PDF route."
     ];
 
     const techStack = [
@@ -1028,7 +1028,7 @@ python -m aegis.tests.compliance_test        # 11-framework self-tests">Copy</bu
       "Self-hosted Qwen3 LLM", "OpenAI-compatible /v1/chat/completions", "containerlab + Docker twin",
       "srlinux · ceos · frr · junos · ios · panos", "Batfish-style static analysis (:5757)", "hashlib sha256 integrity",
       "detached Ed25519 CROSS-3 seal", "canonical JSON", "JSON Schema draft-07", "jsonschema 3.2.0", "reportlab A4 PDF (air-gap safe)",
-      "urllib only (no external DNS)", "docker-compose airgap (network_mode:none)", "GitHub Actions CI (7 suites)"
+      "urllib only (no external DNS)", "docker-compose airgap (network_mode:none)", "GitHub Actions CI (8 suites)"
     ];
 
     const components = [
@@ -1041,10 +1041,11 @@ python -m aegis.tests.compliance_test        # 11-framework self-tests">Copy</bu
       { name: "evidence/compliance.py", responsibility: "Deterministic control crosswalk: map_controls() plus an auto-discovered registry of 11 framework modules. PCI-DSS v4 includes 1.2.1 and 8.3.2 (strong crypto for auth — the 0.2.0 id, not 8.3.1).", tech: "per-framework modules · ComplianceSignal" },
       { name: "evidence/pdf.py", responsibility: "render_pdf() turns a hash-valid bundle into an A4 PDF — verdict, twin, controls, config, rollback, sha256/egress, and (if present) unverified seal claim text. The HTTP wrapper re-checks bundler.verify only; it does not call verify_seal.", tech: "reportlab platypus · air-gap safe" },
       { name: "evidence/schema/evidence_bundle.schema.json", responsibility: "The JSON Schema (draft-07) every emitted evidence bundle is validated against — the structural contract the stress test checks 25,000 times with zero failures.", tech: "JSON Schema draft-07 · jsonschema 3.2.0" },
-      { name: "core/promote/gate.py", responsibility: "Phase 2 approval gate: evaluate() applies five deterministic rules — G1 bundler.verify, G2 verdict, G3 medium/high risk needs approver+token, G4 live connector needs AEGIS_PROMOTE_ALLOW_LIVE=1, G5 re-derives the autonomy ceiling. Returns a frozen GateDecision. Does not call verify_seal.", tech: "frozen dataclass · pure function" },
+      { name: "core/promote/gate.py", responsibility: "Phase 2 approval gate: evaluate() applies five deterministic rules — G1 bundler.verify, G2 verdict, G3 medium/high risk needs a verified approval token (HMAC-SHA256 bound to the bundle hash when AEGIS_APPROVE_KEY is set; asserted-unverified otherwise), G4 live connector needs AEGIS_PROMOTE_ALLOW_LIVE=1, G5 re-derives the autonomy ceiling. Returns a frozen GateDecision. Does not call verify_seal.", tech: "frozen dataclass · HMAC-SHA256 tokens" },
+      { name: "core/promote/tokens.py", responsibility: "HMAC-SHA256 approval tokens (T1 #9). mint_token() emits aegis1.<payload>.<mac> bound to approver + bundle sha256 + expiry. verify_approval() is fail-closed when AEGIS_APPROVE_KEY is set and honesty-tier (asserted-unverified) when unset. The raw token is never stored.", tech: "hmac · hashlib · stdlib only" },
       { name: "core/promote/connectors.py", responsibility: "Production-push connectors. DryRunConnector (default, live=False) records what would be pushed and mutates nothing; a live connector is an inert opt-in extension point behind the ProdConnector Protocol.", tech: "typing.Protocol · dry-run by default" },
       { name: "core/seal/seal.py", responsibility: "CROSS-3 detached receipt: seal_bundle signs model identity + authority ceiling + bundle_sha256 with a pinned key. verify_seal runs gates G0–G6 offline against the public key only. Unbounded changes are refused (SealError / seal: null).", tech: "Ed25519 · cryptography" },
-      { name: "serve.py", responsibility: "Community sim-tier Flask server. /preflight UI; POST /api/preflight/run (SimulatorBackend; mode=live → 501) attaches seal_response; POST /api/preflight/evidence/pdf re-checks the sha256 only; GET /api/seal/pubkey and POST /api/seal/verify are the authenticity path. Loopback-bound, strict CSP, 2 MB cap. Invalid AEGIS_SEAL_KEY is SystemExit.", tech: "Flask 3.x · CSP headers" },
+      { name: "serve.py", responsibility: "Community sim-tier Flask server. /preflight UI; POST /api/preflight/run (SimulatorBackend; mode=live → 501) attaches seal_response; POST /api/preflight/evidence/pdf re-checks the sha256 only; POST /api/approve/mint and POST /api/preflight/promote are the HMAC path; GET /api/seal/pubkey and POST /api/seal/verify are the authenticity path. X-Aegis-Key required when AEGIS_API_KEY is set. Pinned AEGIS_SEAL_KEY without an API key is SystemExit. Loopback-bound, strict CSP, 2 MB cap.", tech: "Flask 3.x · CSP headers · HMAC + API key" },
       { name: "ui/preflight_screen.html", responsibility: "Self-contained single-file PreFlight dashboard: type an intent or paste a config, run preflight, watch the verdict + sealed evidence bundle, and download the examiner-ready PDF. No external assets.", tech: "inline HTML/CSS/JS · single asset" }
     ];
 
