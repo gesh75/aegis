@@ -690,7 +690,7 @@
       <div class="hero-copy">
         <div class="hero-badges reveal">
           <span class="pill">Apache-2.0</span>
-          <span class="pill">v0.2.0 · Phase 2 closed</span>
+          <span class="pill">v0.2.0 · Phase 3 HMAC + OSCAL</span>
           <span class="pill">egress <b>none</b></span>
           <span class="pill">Python 3.10+</span>
         </div>
@@ -703,7 +703,7 @@
           <div class="stat-chip reveal" role="listitem"><span class="num" data-count="8">0</span><span class="lbl">invariants</span></div>
           <div class="stat-chip reveal" role="listitem"><span class="num" data-count="0">0</span><span class="lbl">violations</span></div>
           <div class="stat-chip reveal" role="listitem"><span class="num" data-count="2000">0</span><span class="lbl">concurrent runs</span></div>
-          <div class="stat-chip reveal" role="listitem"><span class="num" data-count="7">0</span><span class="lbl">CI suites</span></div>
+          <div class="stat-chip reveal" role="listitem"><span class="num" data-count="9">0</span><span class="lbl">CI suites</span></div>
           <div class="stat-chip reveal" role="listitem"><span class="num" data-count="11">0</span><span class="lbl">frameworks</span></div>
           <div class="stat-chip reveal" role="listitem"><span class="num" data-count="52" data-suffix="k">0</span><span class="lbl">cmd corpus</span></div>
         </div>
@@ -729,11 +729,12 @@
           <h3>At a glance</h3>
           <div class="kv"><span class="k">Codename</span><span class="v">Evidence-Grade Inspection</span></div>
           <div class="kv"><span class="k">Version</span><span class="v">v0.2.0 (2026-06-12)</span></div>
-          <div class="kv"><span class="k">Phase</span><span class="v">Phase 2 closed · Phase 3</span></div>
+          <div class="kv"><span class="k">Phase</span><span class="v">Phase 3 software closed</span></div>
           <div class="kv"><span class="k">License</span><span class="v">Apache-2.0</span></div>
           <div class="kv"><span class="k">Only AI dep</span><span class="v">Self-hosted Qwen3</span></div>
           <div class="kv"><span class="k">Integrity</span><span class="v seal">sha256</span></div>
           <div class="kv"><span class="k">Authenticity</span><span class="v seal">Ed25519</span></div>
+          <div class="kv"><span class="k">Approvals</span><span class="v seal">HMAC-SHA256</span></div>
           <div class="kv"><span class="k">Egress</span><span class="v seal">none</span></div>
         </aside>
       </div>
@@ -989,7 +990,7 @@ python -m aegis.tests.compliance_test        # 11-framework self-tests">Copy</bu
         <a href="#components">Components</a>
       </div>
     </div>
-    <p class="footer-note">Auto-generated documentation · single-page, self-contained, air-gap safe. v0.2.0 community core (Apache-2.0). SHA-256 is integrity; Ed25519 is authenticity — see docs/EVIDENCE.md. Live production-push connectors, RBAC, and hosted multi-tenant compute are the commercial tier.</p>
+    <p class="footer-note">Auto-generated documentation · single-page, self-contained, air-gap safe. v0.2.0 community core (Apache-2.0). SHA-256 is integrity; Ed25519 is authenticity; HMAC binds approvals; OSCAL/CAB are exports, not ATOs — see docs/EVIDENCE.md. Live production-push connectors, RBAC, and hosted multi-tenant compute are the commercial tier.</p>
   </footer>
 
   <button type="button" class="to-top" id="toTop" aria-label="Back to top">↑</button>
@@ -1006,7 +1007,8 @@ python -m aegis.tests.compliance_test        # 11-framework self-tests">Copy</bu
       { icon: "🔌", title: "Pluggable backend Protocol", description: "A single six-method Backend Protocol lets the identical pipeline run in an in-process SimulatorBackend (CI / community tier) or against the in-perimeter HttpBackend :5757 live stack." },
       { icon: "📋", title: "Config-import path", description: "Paste a sanitized running-config instead of an NL intent — the most auditable mode, because no LLM is in the loop at all, only deterministic verification." },
       { icon: "🚦", title: "Phase 2 promotion gate", description: "A deterministic five-rule gate (G1 hash integrity, G2 verdict, G3 risk, G4 live opt-in, G5 autonomy ceiling) decides whether a bundle reaches production. G2/G3 require an HMAC-SHA256 token bound to the bundle hash when AEGIS_APPROVE_KEY is set; otherwise the pair is recorded as asserted-unverified. Dry-run is the only default connector. Promote G1 is the content hash, not verify_seal." },
-      { icon: "📊", title: "Adversarially stress-proven", description: "25,000 randomized + adversarial runs and 2,000 concurrent runs hold 8 invariants with zero violations — never ships an unsafe change, never leaks a twin, always pins egress to none." }
+      { icon: "📊", title: "Adversarially stress-proven", description: "25,000 randomized + adversarial runs and 2,000 concurrent runs hold 8 invariants with zero violations — never ships an unsafe change, never leaks a twin, always pins egress to none." },
+      { icon: "🧾", title: "OSCAL AR + CAB export", description: "POST /api/preflight/evidence/oscal emits AEGIS-shaped Assessment Results (OSCAL 1.1.2 structure) — not a FedRAMP package. POST .../cab is a one-page CAB packet; rollback.verified_in_twin is always false because the reverse was not executed." }
     ];
 
     const dataFlow = [
@@ -1039,13 +1041,14 @@ python -m aegis.tests.compliance_test        # 11-framework self-tests">Copy</bu
       { name: "core/backends/http_backend.py", responsibility: "HttpBackend: adapts AEGIS to the in-perimeter DCN_Network_Tool :5757 stack and a self-hosted Qwen3 model-runner. Parsing split into pure parse_* functions so they can be contract-tested with no network.", tech: "urllib only · no external DNS" },
       { name: "evidence/bundler.py", responsibility: "Assembles the evidence bundle and computes integrity.sha256: build_bundle() composes change/twin/validation/rollback/verdict/integrity, compute_sha256() hashes canonical JSON with the hash field blanked and seal popped, and integrity.egress is hard-pinned to none. This digest is self-consistency, not a signature.", tech: "hashlib sha256 · canonical JSON" },
       { name: "evidence/compliance.py", responsibility: "Deterministic control crosswalk: map_controls() plus an auto-discovered registry of 11 framework modules. PCI-DSS v4 includes 1.2.1 and 8.3.2 (strong crypto for auth — the 0.2.0 id, not 8.3.1).", tech: "per-framework modules · ComplianceSignal" },
-      { name: "evidence/pdf.py", responsibility: "render_pdf() turns a hash-valid bundle into an A4 PDF — verdict, twin, controls, config, rollback, sha256/egress, and (if present) unverified seal claim text. The HTTP wrapper re-checks bundler.verify only; it does not call verify_seal.", tech: "reportlab platypus · air-gap safe" },
+      { name: "evidence/oscal.py", responsibility: "to_oscal() maps a hash-valid bundle onto OSCAL 1.1.2 Assessment Results structure. metadata.remarks admits this is not a FedRAMP package. Fail rows become findings; every control row is an observation.", tech: "stdlib · OSCAL-shaped JSON" },
+      { name: "evidence/cab.py", responsibility: "to_cab() emits a one-page CAB packet: what changed, which intents still hold, rollback plan. rollback.verified_in_twin is always false — the reverse was not applied in the twin.", tech: "stdlib · honesty flags" },
       { name: "evidence/schema/evidence_bundle.schema.json", responsibility: "The JSON Schema (draft-07) every emitted evidence bundle is validated against — the structural contract the stress test checks 25,000 times with zero failures.", tech: "JSON Schema draft-07 · jsonschema 3.2.0" },
       { name: "core/promote/gate.py", responsibility: "Phase 2 approval gate: evaluate() applies five deterministic rules — G1 bundler.verify, G2 verdict, G3 medium/high risk needs a verified approval token (HMAC-SHA256 bound to the bundle hash when AEGIS_APPROVE_KEY is set; asserted-unverified otherwise), G4 live connector needs AEGIS_PROMOTE_ALLOW_LIVE=1, G5 re-derives the autonomy ceiling. Returns a frozen GateDecision. Does not call verify_seal.", tech: "frozen dataclass · HMAC-SHA256 tokens" },
       { name: "core/promote/tokens.py", responsibility: "HMAC-SHA256 approval tokens (T1 #9). mint_token() emits aegis1.<payload>.<mac> bound to approver + bundle sha256 + expiry. verify_approval() is fail-closed when AEGIS_APPROVE_KEY is set and honesty-tier (asserted-unverified) when unset. The raw token is never stored.", tech: "hmac · hashlib · stdlib only" },
       { name: "core/promote/connectors.py", responsibility: "Production-push connectors. DryRunConnector (default, live=False) records what would be pushed and mutates nothing; a live connector is an inert opt-in extension point behind the ProdConnector Protocol.", tech: "typing.Protocol · dry-run by default" },
       { name: "core/seal/seal.py", responsibility: "CROSS-3 detached receipt: seal_bundle signs model identity + authority ceiling + bundle_sha256 with a pinned key. verify_seal runs gates G0–G6 offline against the public key only. Unbounded changes are refused (SealError / seal: null).", tech: "Ed25519 · cryptography" },
-      { name: "serve.py", responsibility: "Community sim-tier Flask server. /preflight UI; GET /api/status is public and returns {api_auth, approve_hmac, seal, egress} with no secrets; POST /api/preflight/run (SimulatorBackend; mode=live → 501) attaches seal_response; POST /api/preflight/evidence/pdf re-checks the sha256 only; POST /api/approve/mint and POST /api/preflight/promote are the HMAC path; GET /api/seal/pubkey and POST /api/seal/verify are the authenticity path. X-Aegis-Key required when AEGIS_API_KEY is set. Pinned AEGIS_SEAL_KEY without an API key is SystemExit. Loopback-bound, strict CSP, 2 MB cap.", tech: "Flask 3.x · CSP headers · HMAC + API key" },
+      { name: "serve.py", responsibility: "Community sim-tier Flask server. /preflight UI; GET /api/status is public and returns {api_auth, approve_hmac, seal, egress} with no secrets; POST /api/preflight/run (SimulatorBackend; mode=live → 501) attaches seal_response; POST /api/preflight/evidence/{pdf,oscal,cab} re-check the sha256; POST /api/approve/mint and POST /api/preflight/promote are the HMAC path; GET /api/seal/pubkey and POST /api/seal/verify are the authenticity path. X-Aegis-Key required when AEGIS_API_KEY is set. Pinned AEGIS_SEAL_KEY without an API key is SystemExit. Loopback-bound, strict CSP, 2 MB cap.", tech: "Flask 3.x · CSP headers · HMAC + API key" },
       { name: "ui/preflight_screen.html", responsibility: "Self-contained single-file PreFlight dashboard: type an intent or paste a config, run preflight, watch the verdict + sealed evidence bundle, and download the examiner-ready PDF. No external assets.", tech: "inline HTML/CSS/JS · single asset" }
     ];
 

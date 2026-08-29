@@ -91,7 +91,31 @@ do not hand a downloaded PDF to an examiner as proof of origin.
 
 ---
 
-## 4. Auditor runbook (community sim tier)
+## 4. OSCAL Assessment Results (`evidence/oscal.py`)
+
+```
+POST /api/preflight/evidence/oscal
+```
+
+Same 400 / 422 integrity gate as the PDF. Returns AEGIS-shaped Assessment Results
+JSON (`oscal-version: 1.1.2`). `metadata.remarks` states this is **not** a FedRAMP
+authorization package. Control rows (`validation.compliance`) become observations;
+`fail` rows become findings. `kind` is `aegis-oscal-ar-v1`.
+
+## 5. CAB one-pager (`evidence/cab.py`)
+
+```
+POST /api/preflight/evidence/cab
+```
+
+Same integrity gate. Payload `kind: aegis-cab-v1`: what changed, which intents still
+hold, rollback steps. `rollback.verified_in_twin` is **always false** — the reverse
+was not applied in the twin. Do not tell a CAB the rollback was proven if this flag
+is false.
+
+---
+
+## 6. Auditor runbook (community sim tier)
 
 Community server: `python -m aegis.serve` → `http://127.0.0.1:8088`
 (`AEGIS_HOST` / `AEGIS_PORT`). Live twin mode is **501** here; this runbook
@@ -153,7 +177,7 @@ root of trust.
 
 ---
 
-## 5. Pitfalls
+## 7. Pitfalls
 
 - **Client-computed hash.** Invent a bundle, set `integrity.sha256` to
   `compute_sha256(bundle)`, POST it to the PDF route → **200**. That is the

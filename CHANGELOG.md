@@ -8,6 +8,15 @@ versioning is [SemVer](https://semver.org).
 Post-0.2.0 hardening that landed on `main` after the 0.2.0 tag. Documented here so
 operators can see fail-closed behavior that is already in the code.
 
+### Added
+- **OSCAL Assessment Results export**: `evidence/oscal.py` `to_oscal(bundle)` plus
+  `POST /api/preflight/evidence/oscal`. AEGIS-shaped AR JSON (OSCAL 1.1.2 structure).
+  Honest: not a FedRAMP authorization package. Integrity must verify (same 400/422
+  contract as the PDF).
+- **CAB one-pager**: `evidence/cab.py` `to_cab(bundle)` plus
+  `POST /api/preflight/evidence/cab`. What changed, which intents still hold, rollback
+  plan. `rollback.verified_in_twin` is always false — the reversal was not executed.
+
 ### Fixed
 - **Fail-closed Idle BGP / empty apply / empty configgen** (#17): Nornir `status==ok`
   no longer invents a session. Idle or empty results never converge. Twin-apply requires
@@ -44,8 +53,8 @@ operators can see fail-closed behavior that is already in the code.
   the detached Ed25519 receipt is origin + ceiling proof. Documents that
   `POST /api/preflight/evidence/pdf` calls `bundler.verify` only (not `verify_seal`),
   plus the auditor path (`/api/seal/pubkey`, `/api/seal/verify`, G0–G6).
-- Pages (`docs/index.html`) now advertises **v0.2.0**, G1–G5, 7 CI suites, 11 frameworks,
-  and does not call the content hash a seal.
+- Pages (`docs/index.html`) now advertises **v0.2.0**, G1–G5 + HMAC, 8+ CI suites,
+  11 frameworks, OSCAL/CAB exports, and does not call the content hash a seal.
 
 ## [0.2.0] — 2026-06-12
 

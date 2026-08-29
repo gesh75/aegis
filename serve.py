@@ -24,6 +24,8 @@ from aegis.core.orchestrator.pipeline import run_preflight, PreflightError
 from aegis.core.backends.simulator import SimulatorBackend
 from aegis.evidence.pdf import render_pdf
 from aegis.evidence.bundler import verify as bundler_verify
+from aegis.evidence.oscal import to_oscal
+from aegis.evidence.cab import to_cab
 from aegis.core.seal import Ed25519Signer, Ed25519Verifier, seal_response, verify_seal
 from aegis.core.promote.promote import promote, PromoteDenied
 from aegis.core.promote.connectors import get_connector
@@ -206,6 +208,46 @@ def evidence_pdf():
     run = re.sub(r"[^a-f0-9]", "", str(bundle.get("run_id", "bundle")))[:12] or "bundle"
     return Response(pdf, mimetype="application/pdf", headers={
         "Content-Disposition": f'attachment; filename="aegis-evidence-{run}.pdf"'})
+
+
+def _verified_bundle():
+    """Shared gate for PDF / OSCAL / CAB: API key + sha present + bundler.verify."""
+    denied = _guard_api()
+    if denied:
+        return denied, None
+    bundle = request.get_json(silent=True) or {}
+    if not bundle.get("integrity", {}).get("sha256"):
+        return (jsonify({"error": "valid evidence bundle required"}), 400), None
+    if not bundler_verify(bundle):
+        return (jsonify({"error": "bundle integrity verification failed "
+                                 "(content does not match integrity.sha256)"}), 422), None
+    return None, bundle
+
+
+@app.post("/api/preflight/evidence/oscal")
+def evidence_oscal():
+    """OSCAL-shaped Assessment Results. Not a FedRAMP package. Integrity must verify."""
+    err, bundle = _verified_bundle()
+    if err:
+        return err
+    body = to_oscal(bundle)
+    run = re.sub(r"[^a-f0-9]", "", str(bundle.get("run_id", "bundle")))[:12] or "bundle"
+    return jsonify(body), 200, {
+        "Content-Disposition": f'attachment; filename="aegis-oscal-{run}.json"',
+    }
+
+
+@app.post("/api/preflight/evidence/cab")
+def evidence_cab():
+    """One-page CAB packet. Rollback is a plan, not a verified execution."""
+    err, bundle = _verified_bundle()
+    if err:
+        return err
+    body = to_cab(bundle)
+    run = re.sub(r"[^a-f0-9]", "", str(bundle.get("run_id", "bundle")))[:12] or "bundle"
+    return jsonify(body), 200, {
+        "Content-Disposition": f'attachment; filename="aegis-cab-{run}.json"',
+    }
 
 
 @app.post("/api/approve/mint")

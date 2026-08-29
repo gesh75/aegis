@@ -45,6 +45,9 @@ jobs:
       - name: HMAC approval tokens (T1 #9)
         run: python -m aegis.tests.tokens_test
 
+      - name: OSCAL AR + CAB exports
+        run: python -m aegis.tests.oscal_test
+
       - name: Flask endpoints (sim-tier server, test-client)
         run: python -m aegis.tests.api_test
 
