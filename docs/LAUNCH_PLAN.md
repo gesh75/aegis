@@ -1,19 +1,22 @@
 # AEGIS — Launch Plan
 
-Repo is live: **github.com/gesh75/aegis** (v0.1.0, Apache-2.0). This is the plan to take it
-from "pushed" to "known."
+Repo is live: **github.com/gesh75/aegis** (v0.2.0 on main, Apache-2.0). Phase 2 closed.
+Phase 3 HMAC tokens + API-key gate shipped 2026-08-29 (PR #21). This is the plan to take
+it from "pushed" to "known."
 
 ## 1. Assets (status)
 
 | Asset | Status | Where |
 |---|---|---|
-| Repo + README + diagram + release | ✅ done | github.com/gesh75/aegis |
+| Repo + README + diagram + release | ✅ done | github.com/gesh75/aegis (v0.2.0) |
 | Architecture diagram (SVG) | ✅ done | `docs/architecture.svg` |
-| Overview video (animated) | ✅ done | `docs/overview_video.html` (screen-record → MP4) |
+| Overview video (animated) | ✅ done | `docs/overview_video.html` + MP4s in `docs/` |
 | Narration script | ✅ done | `docs/overview_narration.md` |
-| CI workflow (badge → live) | ⬜ next | `.github/workflows/test.yml` |
-| 60–90s MP4 | ⬜ record | from `overview_video.html` |
-| Launch posts | ⬜ draft below | LinkedIn · Show HN · NANOG/Slack |
+| CI workflow (badge → live) | ✅ done | `.github/workflows/test.yml` |
+| 60–90s MP4 | ✅ done | `docs/overview_video.mp4` (64s) + narrated cut |
+| GitHub Pages | ✅ done | https://gesh75.github.io/aegis/ |
+| X launch post | ✅ done 2026-08-29 | https://x.com/gesh755/status/2093609694782738459 |
+| LinkedIn / Show HN / NANOG | ⬜ next | drafts in `docs/launch_posts.md` |
 
 ## 2. The one-line positioning
 
@@ -33,8 +36,8 @@ Lead with the **wedge** (regulated networks can't use cloud tools), not the feat
 
 ## 4. Channels & sequencing
 
-- **Day 0 — CI green + MP4.** Add the GitHub Actions test workflow so the "tests passing"
-  badge is live; record the MP4. Don't launch until the badge is real.
+- **Day 0 — CI green + MP4 + X.** Done. CI badge live; MP4s in `docs/`; X post shipped
+  2026-08-29 with cover image + repo + Pages + Grok lab link.
 - **Day 1 — LinkedIn** (your network of network engineers/architects). Native video + the
   positioning line + link. Best signal-to-effort channel for this audience.
 - **Day 2 — Hacker News "Show HN".** Title: *Show HN: AEGIS – air-gapped network change
@@ -74,8 +77,8 @@ use) · inbound from regulated orgs (the ICP). A star is vanity; an issue from a
 real funnel.
 
 ## 7. Product roadmap that the launch feeds
-- **Now:** CI/CD badge, the MP4, the posts.
-- **Next (Phase 2 cont.):** an audited SSH/NETCONF live connector behind the gate; Linux
+- **Now:** CI/CD badge, MP4s, Pages, X post. HMAC + API-key gate on main.
+- **Next (Phase 2 leftovers):** an audited SSH/NETCONF live connector behind the gate; Linux
   live-twin end-to-end; eval corpus + golden traces.
 - **Later (commercial tier):** hosted twin compute, RBAC/SSO, continuous compliance, the
   examiner-export workflow — the things regulated buyers pay for once the OSS core earns trust.
