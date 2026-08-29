@@ -14,7 +14,9 @@ import json
 import sys
 
 from ..core.backends.http_backend import (
-    parse_batfish, parse_nornir_bgp, parse_pyats_diff, parse_configgen)
+    parse_batfish, parse_nornir_bgp, parse_pyats_diff, parse_configgen,
+    apply_succeeded)
+from ..core.orchestrator.pipeline import _verdict
 
 # ── fixtures: exact shapes returned by the real handlers ─────────────────
 
@@ -36,8 +38,21 @@ NORNIR_OK = {
     "task": "BGP Health", "site": "de-fra", "devices": 6, "workers": 50,
     "elapsed": 3.2, "ok": 6, "warn": 0, "error": 0,
     "results": [{"hostname": f"de-fra-core-0{i}", "status": "ok",
-                 "output": "65010   Established   1245", "elapsed": 0.4}
+                 "output": f"10.0.0.{i} 4 65010 10 10 0 0 0 00:10:00 Established",
+                 "elapsed": 0.4}
                 for i in range(1, 7)],
+}
+NORNIR_IDLE = {
+    "task": "BGP Health", "site": "de-fra", "devices": 4, "workers": 50,
+    "elapsed": 1.1, "ok": 4, "warn": 0, "error": 0,
+    "results": [{"hostname": f"de-fra-core-0{i}", "status": "ok",
+                 "output": f"10.0.0.{i} 4 65010 0 0 0 0 0 never Idle",
+                 "elapsed": 0.3}
+                for i in range(1, 5)],
+}
+NORNIR_EMPTY = {
+    "task": "BGP Health", "site": "de-fra", "devices": 0, "workers": 50,
+    "elapsed": 0.1, "ok": 0, "warn": 0, "error": 0, "results": [],
 }
 NORNIR_DEGRADED = {
     "task": "BGP Health", "site": "de-fra", "devices": 6, "workers": 50,
@@ -78,9 +93,12 @@ LLM_CONFIGGEN = (
 )
 
 FAILS: list[str] = []
+N_CHECKS = 0
 
 
 def check(name: str, cond: bool, detail: str = "") -> None:
+    global N_CHECKS
+    N_CHECKS += 1
     if not cond:
         FAILS.append(f"{name}: {detail}")
 
@@ -108,6 +126,19 @@ def main() -> int:
         "results": [{"status": "warn", "output": ":" * 20_000}],
     })
     check("nornir.malformed_ipv6.bgp_up", malformed_up == 0, f"up={malformed_up}")
+    idle_up, idle_nodes, idle_conv = parse_nornir_bgp(NORNIR_IDLE)
+    check("nornir.idle.bgp_up", idle_up == 0, f"up={idle_up}")
+    check("nornir.idle.nodes", idle_nodes == 4)
+    check("nornir.idle.notconverged", idle_conv is False, f"conv={idle_conv}")
+    idle_decision, _ = _verdict(
+        {"errors": 0},
+        {"converged": idle_conv, "bgp_before": idle_up, "bgp_after": idle_up},
+        "low", False, False)
+    check("nornir.idle.not_ship_ready", idle_decision == "blocked", idle_decision)
+    empty_up, empty_nodes, empty_conv = parse_nornir_bgp(NORNIR_EMPTY)
+    check("nornir.empty.bgp_up", empty_up == 0, f"up={empty_up}")
+    check("nornir.empty.notconverged", empty_conv is False, f"conv={empty_conv}")
+    check("nornir.empty.nodes", empty_nodes == 0)
 
     # pyats diff
     d = parse_pyats_diff(PYATS_DIFF)
@@ -127,6 +158,50 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001
         garbage_raises = "generation_failed" in str(exc)
     check("configgen.garbage_fails_closed", garbage_raises)
+    try:
+        parse_configgen('{"configs":[]}', "single")
+        empty_raises = False
+    except Exception as exc:  # noqa: BLE001
+        empty_raises = "generation_failed" in str(exc)
+    check("configgen.empty_fails_closed", empty_raises)
+    try:
+        parse_configgen('{"configs":[{"device":"leaf-1","vendor":"frr","config":"  "}]}',
+                        "single")
+        blank_raises = False
+    except Exception as exc:  # noqa: BLE001
+        blank_raises = "generation_failed" in str(exc)
+    check("configgen.blank_fails_closed", blank_raises)
+
+    check("apply.missing_fails_closed", apply_succeeded({}) is False)
+    check("apply.false_fails_closed", apply_succeeded({"applied": False}) is False)
+    check("apply.true_ok", apply_succeeded({"applied": True}) is True)
+    check("apply.string_true_fails_closed", apply_succeeded({"applied": "true"}) is False)
+    check("apply.none_fails_closed", apply_succeeded(None) is False)  # type: ignore[arg-type]
+    check("apply.list_fails_closed", apply_succeeded([]) is False)  # type: ignore[arg-type]
+
+    null_up, _, null_conv = parse_nornir_bgp({"error": 0, "results": None})
+    check("nornir.null_results.bgp_up", null_up == 0, f"up={null_up}")
+    check("nornir.null_results.notconverged", null_conv is False, f"conv={null_conv}")
+    list_up, _, list_conv = parse_nornir_bgp([])  # type: ignore[arg-type]
+    check("nornir.list_payload.notconverged", list_up == 0 and list_conv is False)
+    bad_err_up, _, bad_err_conv = parse_nornir_bgp({
+        "error": "boom", "results": [{"hostname": "n1", "status": "ok",
+                                     "output": "10.0.0.1 4 65010 10 10 0 0 0 00:10:00 Established"}],
+    })
+    check("nornir.bad_error.notconverged", bad_err_conv is False, f"conv={bad_err_conv}")
+    check("nornir.bad_error.still_counts", bad_err_up == 1, f"up={bad_err_up}")
+    try:
+        parse_configgen("[1,2,3]", "single")
+        array_raises = False
+    except Exception as exc:  # noqa: BLE001
+        array_raises = "generation_failed" in str(exc)
+    check("configgen.array_fails_closed", array_raises)
+    try:
+        parse_configgen('{"configs":"not-a-list"}', "single")
+        bad_list_raises = False
+    except Exception as exc:  # noqa: BLE001
+        bad_list_raises = "generation_failed" in str(exc)
+    check("configgen.non_list_fails_closed", bad_list_raises)
 
     # show the typed results so the mapping is visible
     print(json.dumps({
@@ -142,7 +217,7 @@ def main() -> int:
         for f in FAILS:
             print("  -", f)
         return 1
-    print(f"\n=== CONTRACT TEST: PASS ({4+4+3+4} checks) ===")
+    print(f"\n=== CONTRACT TEST: PASS ({N_CHECKS} checks) ===")
     return 0
 
 

@@ -68,27 +68,57 @@ def parse_batfish(resp: dict) -> BatfishResult:
 def parse_nornir_bgp(resp: dict) -> tuple[int, int, bool]:
     """From a bgp_health nornir run -> (bgp_up_count, node_count, all_converged).
 
-    A device is 'converged' when status == 'ok'. bgp_up is counted from the per-device
-    output line count of Established peers when present, else falls back to ok devices.
+    bgp_up counts Established peer rows only (neighbor IP + numeric/Estab state).
+    Nornir status==ok means the command ran — it is NOT a session. Inventing one
+    session per ok device made Idle/unparseable output look healthy on both sides
+    of a change and produced a sealed ship_ready verdict.
+
+    Converged requires the nornir contract, error==0, at least one result, and at
+    least one actually-observed Established session. Empty inventories and
+    command-ok-but-all-Idle runs fail closed.
     """
-    results = resp.get("results", [])
-    node_count = int(resp.get("devices", len(results)))
-    # fail closed: a response missing the error/results contract is NOT converged
-    converged = "error" in resp and "results" in resp and int(resp.get("error", 1)) == 0
+    payload = resp if isinstance(resp, dict) else {}
+    raw_results = payload.get("results", [])
+    results = raw_results if isinstance(raw_results, list) else []
+    try:
+        node_count = int(payload.get("devices", len(results)))
+    except (TypeError, ValueError):
+        node_count = len(results)
     bgp_up = 0
     for r in results:
+        if not isinstance(r, dict):
+            continue
         out = r.get("output", "") or ""
+        if not isinstance(out, str):
+            continue
         # FRR/EOS 'show bgp summary': a peer row starts with the neighbor IP
         # (v4 or v6) and is
         # Established when the State/PfxRcd column is numeric or 'Estab*'. Matching
         # peer rows only — a bare digit-terminated line (uptimes, counters, totals)
         # must NOT count as a session.
-        est = len(re.findall(
+        bgp_up += len(re.findall(
             r"^\s*(?:\d{1,3}(?:\.\d{1,3}){3}|(?=[^\s]*:)[0-9A-Fa-f:.]+)"
             r"\s+\S.*?\s(?:\d+|Estab\w*)\s*$",
             out, re.MULTILINE))
-        bgp_up += est if est else (1 if r.get("status") == "ok" else 0)
+    # fail closed: missing contract, task errors, empty/malformed inventory,
+    # or zero observed sessions are NOT converged
+    try:
+        err = int(payload.get("error", 1))
+    except (TypeError, ValueError):
+        err = 1
+    converged = (
+        isinstance(resp, dict)
+        and "error" in payload and "results" in payload
+        and err == 0
+        and bool(results)
+        and bgp_up > 0
+    )
     return bgp_up, node_count, converged
+
+
+def apply_succeeded(resp: dict) -> bool:
+    """True only when twin-apply explicitly reports success. Missing key → fail closed."""
+    return isinstance(resp, dict) and resp.get("applied") is True
 
 
 def parse_pyats_diff(resp: dict) -> DiffResult:
@@ -127,18 +157,31 @@ def parse_configgen(content: str, lab: str) -> list[GeneratedConfig]:
         # sealed ship_ready bundle for a change that was never actually generated
         from aegis.core.orchestrator.pipeline import PreflightError
         raise PreflightError("generation_failed: LLM returned unparseable output") from exc
+    if not isinstance(data, dict):
+        from aegis.core.orchestrator.pipeline import PreflightError
+        raise PreflightError("generation_failed: LLM returned unparseable output")
+    raw_cfgs = data.get("configs", [])
+    if not isinstance(raw_cfgs, list):
+        from aegis.core.orchestrator.pipeline import PreflightError
+        raise PreflightError("generation_failed: LLM returned no configs")
     out: list[GeneratedConfig] = []
     vendors = _LAB_VENDORS.get(lab, ["frr"])
-    for i, c in enumerate(data.get("configs", [])):
+    for i, c in enumerate(raw_cfgs):
+        if not isinstance(c, dict):
+            continue
+        grounded = c.get("grounded_commands", [])
         out.append(GeneratedConfig(
             device=c.get("device") or f"{lab}-node-{i+1}",
             vendor=c.get("vendor") or vendors[i % len(vendors)],
-            config=c.get("config", ""),
-            grounded_commands=list(c.get("grounded_commands", [])),
+            config=c.get("config", "") if isinstance(c.get("config", ""), str) else "",
+            grounded_commands=list(grounded) if isinstance(grounded, list) else [],
         ))
-    return out or [GeneratedConfig(device=f"{lab}-node-1", vendor="frr",
-                                   config="# (no configs returned)",
-                                   grounded_commands=[])]
+    if not out or not any((c["config"] or "").strip() for c in out):
+        # same class as unparseable output: an empty/stub configs array used to
+        # become "# (no configs returned)" and sail through to ship_ready
+        from aegis.core.orchestrator.pipeline import PreflightError
+        raise PreflightError("generation_failed: LLM returned no configs")
+    return out
 
 
 # ── HTTP backend ─────────────────────────────────────────────────────────
@@ -209,7 +252,7 @@ class HttpBackend:
         bgp_after, node_count, converged = parse_nornir_bgp(post)
         return TwinResult(
             topology=lab, node_count=node_count,
-            converged=bool(applied.get("applied", True)) and converged,
+            converged=apply_succeeded(applied) and converged,
             convergence_sec=round(_t.perf_counter() - t0, 2),
             bgp_before=bgp_before, bgp_after=bgp_after,
         )
