@@ -325,3 +325,25 @@ The Phase 2 gate grew a fifth rule and three supporting packages. Documented in
 Remaining Phase 2: implement + audit a real SSH/NETCONF connector behind the gate, RBAC/SSO,
 multi-tenant hosting, Linux live-twin end-to-end run, eval corpus / golden traces.
 Hardware-PIV signer + compiled-in ceiling: `docs/PIV_HARDWARE_SIGNER_PLAN.md`.
+
+---
+
+## Phase 3 — Evidence authenticity  ·  in flight 2026-08-29
+
+HMAC approvals and API auth close the two remaining honesty holes in the promotion
+path (improvement plan T1 #9 and T1 #10). Hardware PIV stays later — it needs a
+token in hand.
+
+- `core/promote/tokens.py` — `aegis1.<payload>.<mac>` HMAC-SHA256 tokens bound to
+  bundle sha256 + approver + expiry. `AEGIS_APPROVE_KEY` unset = `asserted-unverified`.
+- `core/promote/gate.py` G2/G3 consume `verify_approval`. A random string is a deny
+  once the key is set.
+- `core/promote/promote.py` writes `approval.method` + `token_sha256` (never the raw
+  token). Empty `generated_configs` is `PromoteDenied`.
+- `serve.py` — `X-Aegis-Key` on mutating routes when `AEGIS_API_KEY` is set. Pinned
+  `AEGIS_SEAL_KEY` without an API key is `SystemExit`. New:
+  `GET /api/status`, `POST /api/approve/mint`, `POST /api/preflight/promote`.
+- Tests: `tests/tokens_test.py` in CI; promote P8; api_test auth + mint + promote.
+
+Next on this phase: OSCAL Assessment Results export, one-page CAB export, then
+YubiKey PIV (`docs/PIV_HARDWARE_SIGNER_PLAN.md`) when the hardware is on the desk.

@@ -18,7 +18,9 @@ Companion pages: [ARCHITECTURE.md](ARCHITECTURE.md) (maps) · [GO_LIVE.md](GO_LI
 | `AEGIS_LLM_WEIGHTS` | same | Optional path; hashed once (path, mtime, size cache) into `weights-sha256`. Missing file → honest `identity-claim`, not a crash. |
 | `ANTHROPIC_API_KEY` | `from_env` | Presence-only. Enables cloud fallback **only when air-gap is off**. The key is never stored on the config object. |
 | `AEGIS_MAX_AUTHORIZED_TIER` | `core/risk/authority.py` | `AUTO` \| `HITL` \| `HOTL`. Default `HOTL`. `BLOCK` and unknown values **raise**. |
-| `AEGIS_SEAL_KEY` | `serve.py` | 64 hex chars = pinned Ed25519 seed. Unset = ephemeral demo key. Invalid = `SystemExit`. |
+| `AEGIS_SEAL_KEY` | `serve.py` | 64 hex chars = pinned Ed25519 seed. Unset = ephemeral demo key. Invalid = `SystemExit`. Pinned key **requires** `AEGIS_API_KEY` (T1 #10). |
+| `AEGIS_API_KEY` | `serve.py` | When set, mutating routes require header `X-Aegis-Key`. Custom header also breaks trivial CSRF POSTs. |
+| `AEGIS_APPROVE_KEY` | `core/promote/tokens.py` | HMAC-SHA256 key for G2/G3 tokens. Hex (≥32 chars) or raw (≥16 bytes). Unset = asserted-unverified. Set-but-too-short = `SystemExit`. |
 | `AEGIS_PROMOTE_ALLOW_LIVE=1` | `core/promote/gate.py` G4 | Required in addition to a live connector. |
 | `AEGIS_HOST` / `AEGIS_PORT` | `serve.py` | Bind address (default `127.0.0.1:8088`). |
 
@@ -102,11 +104,19 @@ was previously under-counted; do not compare old vs new `bgp_sessions` numbers b
 `evaluate()` in `core/promote/gate.py`:
 
 1. G1 — `bundler.verify` (sha256, `seal` excluded from the hash)
-2. G2 — `blocked` never promotes; `needs_approval` needs approver + token
-3. G3 — medium/high risk needs approver + token
+2. G2 — `blocked` never promotes; `needs_approval` needs approver + **verified** token
+3. G3 — medium/high risk needs approver + **verified** token
 4. G4 — live connector needs `AEGIS_PROMOTE_ALLOW_LIVE=1`
 5. G5 — re-load ceiling and `authorize(required, ceiling)`. Missing / unknown
    `change.authority` → deny.
+
+Token verification (`core/promote/tokens.py`):
+
+- `AEGIS_APPROVE_KEY` **set**: token must be `aegis1.<b64url payload>.<b64url hmac-sha256>`,
+  payload `{"a": approver, "b": bundle_sha256, "exp": unix, "n": nonce, "v": 1}`, MAC over
+  the exact payload bytes. Wrong approver, wrong hash, expiry, or a random string → deny.
+- **Unset**: any non-empty pair is accepted and recorded as `asserted-unverified`.
+- The raw token is never written. Promotion records store `approval.method` + `token_sha256`.
 
 The seal (`core/seal/seal.py`) additionally refuses to certify an unbounded change.
 
@@ -117,10 +127,13 @@ The seal (`core/seal/seal.py`) additionally refuses to certify an unbounded chan
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/preflight` | Sim-tier UI |
-| POST | `/api/preflight/run` | `mode=live` → **501**. Sim only. |
-| POST | `/api/preflight/evidence/pdf` | Integrity must verify or **422** |
-| GET | `/api/seal/pubkey` | Offline verify material |
-| POST | `/api/seal/verify` | Body `{bundle, seal}` |
+| GET | `/api/status` | Public. `{api_auth, approve_hmac, seal, egress}` — no secrets. |
+| POST | `/api/preflight/run` | `mode=live` → **501**. Sim only. Auth when `AEGIS_API_KEY` set. |
+| POST | `/api/preflight/evidence/pdf` | Integrity must verify or **422**. Auth when key set. |
+| POST | `/api/approve/mint` | HMAC token bound to `bundle_sha256`. **503** if HMAC unset. |
+| POST | `/api/preflight/promote` | Gate G1–G5 then dry-run (default). **403** on deny. |
+| GET | `/api/seal/pubkey` | Offline verify material (public). |
+| POST | `/api/seal/verify` | Body `{bundle, seal}` (public). |
 
 CSP is loopback-oriented; `MAX_CONTENT_LENGTH` is 2 MB.
 
@@ -137,6 +150,7 @@ python -m aegis.tests.authority_test
 python -m aegis.tests.ceiling_test
 python -m aegis.tests.seal_test
 python -m aegis.tests.wedge_test
+python -m aegis.tests.tokens_test
 ```
 
 Run them from the directory **above** `aegis/` (same as CI: checkout into `aegis/`).

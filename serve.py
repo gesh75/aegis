@@ -13,6 +13,7 @@ Live mode (real Qwen3 + containerlab twin) lives in the integrated deployment
 """
 from __future__ import annotations
 import base64
+import hmac as hmaclib
 import os
 import re
 from datetime import datetime, timezone
@@ -24,6 +25,11 @@ from aegis.core.backends.simulator import SimulatorBackend
 from aegis.evidence.pdf import render_pdf
 from aegis.evidence.bundler import verify as bundler_verify
 from aegis.core.seal import Ed25519Signer, Ed25519Verifier, seal_response, verify_seal
+from aegis.core.promote.promote import promote, PromoteDenied
+from aegis.core.promote.connectors import get_connector
+from aegis.core.promote.tokens import (
+    TokenError, hmac_configured, mint_token, load_approve_key,
+)
 
 _UI = os.path.join(os.path.dirname(__file__), "ui", "preflight_screen.html")
 
@@ -46,11 +52,39 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024  # 2 MB
 
 
+def _api_key() -> str:
+    return (os.environ.get("AEGIS_API_KEY") or "").strip()
+
+
+def _guard_api():
+    """T1 #10: when AEGIS_API_KEY is set, mutating routes require X-Aegis-Key.
+
+    A custom header (not a cookie) also breaks trivial cross-site POSTs. Comparison
+    is constant-time. Unset key = community/sim stays open, matching existing tests.
+    """
+    expected = _api_key()
+    if not expected:
+        return None
+    got = request.headers.get("X-Aegis-Key") or ""
+    if not hmaclib.compare_digest(got, expected):
+        return jsonify({"error": "unauthorized — send X-Aegis-Key"}), 401
+    return None
+
+
 def _load_signer() -> Ed25519Signer:
     """Seal signing key. AEGIS_SEAL_KEY = 64 hex chars (an Ed25519 private seed) pins a
     stable key whose receipts verify across restarts; otherwise an EPHEMERAL demo key is
-    used. Production swaps this for a YubiKey-PIV signer (same Signer protocol)."""
+    used. Production swaps this for a YubiKey-PIV signer (same Signer protocol).
+
+    T1 #10: a pinned seal key without API auth is refused — unauthenticated deployments
+    must never mint pinned-key seals.
+    """
     raw = (os.environ.get("AEGIS_SEAL_KEY") or "").strip()
+    if raw and not _api_key():
+        raise SystemExit(
+            "[aegis.auth] AEGIS_SEAL_KEY is pinned but AEGIS_API_KEY is unset; "
+            "refusing to mint pinned-key seals on an unauthenticated server"
+        )
     if raw:
         try:
             return Ed25519Signer.from_private_bytes(bytes.fromhex(raw))
@@ -65,6 +99,7 @@ def _load_signer() -> Ed25519Signer:
 
 _SIGNER = _load_signer()
 _VERIFIER: Ed25519Verifier = _SIGNER.verifier()
+load_approve_key()  # SystemExit if AEGIS_APPROVE_KEY is set but unusable
 
 
 @app.after_request
@@ -95,8 +130,22 @@ def ui():
         return Response(fh.read(), mimetype="text/html")
 
 
+@app.get("/api/status")
+def status():
+    """Public, no secrets: whether this process requires API auth / HMAC approvals."""
+    return jsonify({
+        "api_auth": "required" if _api_key() else "open",
+        "approve_hmac": "required" if hmac_configured() else "asserted-unverified",
+        "seal": "pinned" if (os.environ.get("AEGIS_SEAL_KEY") or "").strip() else "ephemeral",
+        "egress": "none",
+    })
+
+
 @app.post("/api/preflight/run")
 def preflight_run():
+    denied = _guard_api()
+    if denied:
+        return denied
     data = request.get_json(silent=True) or {}
     if (data.get("mode") or "sim") == "live":
         return jsonify({"error": "live mode is not available in the community tier",
@@ -136,6 +185,9 @@ def preflight_run():
 
 @app.post("/api/preflight/evidence/pdf")
 def evidence_pdf():
+    denied = _guard_api()
+    if denied:
+        return denied
     bundle = request.get_json(silent=True) or {}
     if not bundle.get("integrity", {}).get("sha256"):
         return jsonify({"error": "valid evidence bundle required"}), 400
@@ -154,6 +206,60 @@ def evidence_pdf():
     run = re.sub(r"[^a-f0-9]", "", str(bundle.get("run_id", "bundle")))[:12] or "bundle"
     return Response(pdf, mimetype="application/pdf", headers={
         "Content-Disposition": f'attachment; filename="aegis-evidence-{run}.pdf"'})
+
+
+@app.post("/api/approve/mint")
+def approve_mint():
+    """Mint an HMAC approval token bound to a bundle hash. Requires AEGIS_APPROVE_KEY."""
+    denied = _guard_api()
+    if denied:
+        return denied
+    if not hmac_configured():
+        return jsonify({"error": "AEGIS_APPROVE_KEY is unset — HMAC minting refused "
+                                 "(asserted-unverified mode)"}), 503
+    data = request.get_json(silent=True) or {}
+    try:
+        token = mint_token(
+            approver=data.get("approver") or "",
+            bundle_sha256=data.get("bundle_sha256") or "",
+            ttl_sec=int(data.get("ttl_sec") or 14400),
+        )
+    except (TokenError, TypeError, ValueError) as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({
+        "token": token,
+        "alg": "hmac-sha256",
+        "bound_to": (data.get("bundle_sha256") or "").strip().lower(),
+        "approver": (data.get("approver") or "").strip(),
+    })
+
+
+@app.post("/api/preflight/promote")
+def preflight_promote():
+    denied = _guard_api()
+    if denied:
+        return denied
+    data = request.get_json(silent=True) or {}
+    bundle = data.get("bundle")
+    if not isinstance(bundle, dict):
+        return jsonify({"error": "body must include bundle"}), 400
+    try:
+        conn = get_connector(data.get("connector") or "dry_run")
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    allow_live = (os.environ.get("AEGIS_PROMOTE_ALLOW_LIVE") or "").strip() == "1"
+    try:
+        rec = promote(
+            bundle, connector=conn,
+            approver=data.get("approver"),
+            approval_token=data.get("approval_token"),
+            allow_live=allow_live,
+        )
+    except PromoteDenied as e:
+        return jsonify({"error": str(e), "denied": True}), 403
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
+    return jsonify(rec)
 
 
 @app.get("/api/seal/pubkey")

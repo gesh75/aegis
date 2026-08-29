@@ -16,6 +16,7 @@ Run: python3 -m aegis.tests.promote_test [N]
 from __future__ import annotations
 import copy
 import json
+import os
 import random
 import sys
 import time
@@ -24,6 +25,7 @@ from ..core.orchestrator.pipeline import run_preflight
 from ..core.backends.simulator import SimulatorBackend
 from ..core.promote.promote import promote, PromoteDenied, _sha256
 from ..core.promote.connectors import DryRunConnector, DisabledLiveConnector
+from ..core.promote.tokens import mint_token
 
 INTENTS = [
     "add vlan {n} to leaf-{n} and peer bgp",                       # mostly ship/needs
@@ -95,7 +97,46 @@ def run(n: int = 4000) -> dict:
     except PromoteDenied:
         pass
 
+    # P8: HMAC key set → a random string is not an approval; a bound token is.
+    hmac_random_promoted = False
+    hmac_bound_ok = False
+    hmac_method = ""
+    os.environ["AEGIS_APPROVE_KEY"] = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+    try:
+        need = clean if clean["verdict"]["decision"] != "blocked" else None
+        if need is None:
+            fails.append("clean vlan bundle was blocked — cannot exercise HMAC P8")
+        else:
+            try:
+                promote(need, connector=DryRunConnector(), approver="noc-lead",
+                        approval_token="tok-123", allow_live=False)
+                # Only a failure if the gate actually required an approval
+                tier = need["change"]["risk_tier"]
+                decision = need["verdict"]["decision"]
+                if decision == "needs_approval" or tier in ("medium", "high"):
+                    hmac_random_promoted = True
+                    fails.append("random token promoted under HMAC key")
+            except PromoteDenied:
+                pass
+            try:
+                tok = mint_token("noc-lead", need["integrity"]["sha256"])
+                rec = promote(need, connector=DryRunConnector(), approver="noc-lead",
+                              approval_token=tok, allow_live=False)
+                hmac_method = (rec.get("approval") or {}).get("method") or ""
+                hmac_bound_ok = hmac_method == "hmac-sha256"
+                if not hmac_bound_ok:
+                    fails.append(f"bound token method={hmac_method!r}")
+                if rec["integrity"]["sha256"] != _sha256(rec):
+                    res["record_hash_fail"] += 1
+                    fails.append("HMAC promotion record hash mismatch")
+            except PromoteDenied as e:
+                fails.append(f"bound HMAC token denied: {e}")
+    finally:
+        os.environ.pop("AEGIS_APPROVE_KEY", None)
+
     return {"results": res, "live_refused_without_optin": live_refused,
+            "hmac_random_refused": not hmac_random_promoted,
+            "hmac_bound_ok": hmac_bound_ok,
             "sample_failures": fails[:10]}
 
 
@@ -104,7 +145,10 @@ def passed(s: dict) -> bool:
     return (r["blocked_promoted"] == 0 and r["tampered_promoted"] == 0
             and r["needs_approval_promoted"] == 0 and r["risk_unapproved_promoted"] == 0
             and r["dryrun_mutated"] == 0 and r["record_hash_fail"] == 0
-            and s["live_refused_without_optin"] and not s["sample_failures"])
+            and s["live_refused_without_optin"]
+            and s.get("hmac_random_refused", False)
+            and s.get("hmac_bound_ok", False)
+            and not s["sample_failures"])
 
 
 if __name__ == "__main__":

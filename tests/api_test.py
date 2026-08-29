@@ -16,10 +16,15 @@ API client depend on:
   10  POST .../evidence/pdf (no sha)   -> 400 valid bundle required
   11  POST .../evidence/pdf (valid)    -> 200 application/pdf, %PDF- magic bytes
   12  bundle egress is always "none"   (air-gap invariant, surfaced over HTTP)
+  16  GET  /api/status                 -> approve_hmac asserted-unverified (no key)
+  17  API key required when set        -> 401 without header, 200 with X-Aegis-Key
+  18  HMAC mint                        -> 503 unset; 200 bound token when keyed
+  19  Promote                          -> 403 on random token under HMAC; 200 bound
 
 Usage:  python3 -m aegis.tests.api_test
 """
 from __future__ import annotations
+import os
 import sys
 
 from ..serve import app
@@ -133,12 +138,97 @@ def main() -> int:
         check("seal.verify.valid", r.status_code == 200 and vd.get("valid") is True,
               f"{r.status_code} {r.get_data(as_text=True)[:120]}")
 
+    # 16 — status is public and honest about HMAC
+    r = c.get("/api/status")
+    st = r.get_json() if r.status_code == 200 else {}
+    check("status.200", r.status_code == 200, str(r.status_code))
+    check("status.hmac_unset", st.get("approve_hmac") == "asserted-unverified", str(st))
+    check("status.api_open", st.get("api_auth") == "open", str(st))
+    check("status.egress", st.get("egress") == "none", str(st))
+
+    # 17 — mint refuses when HMAC is unset
+    r = c.post("/api/approve/mint", json={"approver": "noc-lead", "bundle_sha256": sha})
+    check("mint.unset.503", r.status_code == 503, str(r.status_code))
+
+    # 18 — promote exists (asserted-unverified) for a medium/high or needs_approval bundle
+    if bundle:
+        r = c.post("/api/preflight/promote",
+                   json={"bundle": bundle, "approver": "noc-lead", "approval_token": "tok-123",
+                         "connector": "dry_run"})
+        body = r.get_data(as_text=True)
+        check("promote.asserted.status", r.status_code in (200, 403),
+              f"{r.status_code} {body[:160]}")
+        if r.status_code == 200:
+            rec = r.get_json() or {}
+            check("promote.asserted.method",
+                  (rec.get("approval") or {}).get("method") == "asserted-unverified",
+                  str(rec.get("approval")))
+            check("promote.asserted.hash", len(rec.get("integrity", {}).get("sha256") or "") == 64,
+                  str(rec.get("integrity")))
+
+    # 19 — API key: mutating routes 401 without it; pubkey stays public
+    os.environ["AEGIS_API_KEY"] = "ci-test-key"
+    try:
+        r = c.post("/api/preflight/run", json={"intent": "add vlan 10 to leaf-1"})
+        check("auth.missing.401", r.status_code == 401, str(r.status_code))
+        r = c.post("/api/preflight/run",
+                   json={"intent": "add vlan 10 to leaf-1", "lab": "single",
+                         "frameworks": ["pci_dss_v4"]},
+                   headers={"X-Aegis-Key": "wrong"})
+        check("auth.wrong.401", r.status_code == 401, str(r.status_code))
+        r = c.post("/api/preflight/run",
+                   json={"intent": "add vlan 10 to leaf-1", "lab": "single",
+                         "frameworks": ["pci_dss_v4"]},
+                   headers={"X-Aegis-Key": "ci-test-key"})
+        check("auth.ok.200", r.status_code == 200, f"{r.status_code} {r.get_data(as_text=True)[:160]}")
+        r = c.get("/api/seal/pubkey")
+        check("auth.pubkey.still_public", r.status_code == 200, str(r.status_code))
+        r = c.get("/api/status")
+        st = r.get_json() if r.status_code == 200 else {}
+        check("auth.status.required", st.get("api_auth") == "required", str(st))
+    finally:
+        os.environ.pop("AEGIS_API_KEY", None)
+
+    # 20 — HMAC mint + promote (keyed)
+    os.environ["AEGIS_APPROVE_KEY"] = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+    try:
+        r = c.post("/api/approve/mint",
+                   json={"approver": "noc-lead", "bundle_sha256": sha, "ttl_sec": 600})
+        check("mint.keyed.200", r.status_code == 200, f"{r.status_code} {r.get_data(as_text=True)[:160]}")
+        minted = (r.get_json() or {}).get("token") if r.status_code == 200 else None
+        check("mint.keyed.shape", isinstance(minted, str) and minted.startswith("aegis1."),
+              str(minted)[:40])
+        if bundle:
+            r = c.post("/api/preflight/promote",
+                       json={"bundle": bundle, "approver": "noc-lead",
+                             "approval_token": "tok-123", "connector": "dry_run"})
+            tier = (bundle.get("change") or {}).get("risk_tier")
+            decision = (bundle.get("verdict") or {}).get("decision")
+            needs = decision == "needs_approval" or tier in ("medium", "high")
+            if needs:
+                check("promote.hmac.random.403", r.status_code == 403, str(r.status_code))
+            if minted:
+                r = c.post("/api/preflight/promote",
+                           json={"bundle": bundle, "approver": "noc-lead",
+                                 "approval_token": minted, "connector": "dry_run"})
+                if decision == "blocked":
+                    check("promote.hmac.blocked.403", r.status_code == 403, str(r.status_code))
+                else:
+                    rec = r.get_json() if r.status_code == 200 else {}
+                    check("promote.hmac.bound.200", r.status_code == 200,
+                          f"{r.status_code} {r.get_data(as_text=True)[:160]}")
+                    check("promote.hmac.bound.method",
+                          (rec.get("approval") or {}).get("method") == "hmac-sha256",
+                          str(rec.get("approval")))
+    finally:
+        os.environ.pop("AEGIS_APPROVE_KEY", None)
+
     if FAILS:
         print("\n=== API ENDPOINT TEST: FAIL ===")
         for f in FAILS:
             print("  -", f)
         return 1
-    print(f"\n=== API ENDPOINT TEST: PASS ({CHECKS} checks across 7 routes) ===")
+    print(f"\n=== API ENDPOINT TEST: PASS ({CHECKS} checks across community routes) ===")
     return 0
 
 
