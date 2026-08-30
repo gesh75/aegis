@@ -29,14 +29,16 @@ def _sha256(obj: dict) -> str:
 
 
 def promote(bundle: dict, *, connector: ProdConnector, approver: str | None = None,
-            approval_token: str | None = None, allow_live: bool = False) -> dict:
+            approval_token: str | None = None, allow_live: bool = False,
+            live_inventory_sha256: str | None = None) -> dict:
     configs = (bundle.get("change") or {}).get("generated_configs") or []
     if not configs:
         raise PromoteDenied("nothing to promote")
 
     decision = gate.evaluate(
         bundle, approver=approver, approval_token=approval_token,
-        connector_is_live=getattr(connector, "live", False), allow_live=allow_live)
+        connector_is_live=getattr(connector, "live", False), allow_live=allow_live,
+        live_inventory_sha256=live_inventory_sha256)
     if not decision.allowed:
         raise PromoteDenied(decision.reason)
 
@@ -64,6 +66,7 @@ def promote(bundle: dict, *, connector: ProdConnector, approver: str | None = No
             "method": decision.approval_method,
             "token_sha256": decision.token_sha256,
             "bound_bundle_sha256": bundle["integrity"]["sha256"] if decision.token_sha256 else None,
+            "live_inventory_sha256": live_inventory_sha256 or None,
         },
         "gate_reason": decision.reason,
         "status": "promoted" if all_ok else "partial",
