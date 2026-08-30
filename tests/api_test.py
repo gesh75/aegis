@@ -18,7 +18,7 @@ API client depend on:
   12  bundle egress is always "none"   (air-gap invariant, surfaced over HTTP)
   16  GET  /api/status                 -> approve_hmac asserted-unverified (no key)
   17  API key required when set        -> 401 without header, 200 with X-Aegis-Key
-  18  HMAC mint                        -> 503 unset; 200 v1 when keyed; 200 v2 when bundle given
+  18  HMAC mint                        -> 503 unset; 503 HMAC-without-API-auth; 200 v1/v2 when both keyed
   19  Promote                          -> 403 on random token under HMAC; 200 bound; v2 drift 403
 
 Usage:  python3 -m aegis.tests.api_test
@@ -27,7 +27,7 @@ from __future__ import annotations
 import os
 import sys
 
-from ..serve import app
+from ..serve import app, _require_api_key_for_hmac
 
 FAILS: list[str] = []
 CHECKS = 0
@@ -189,11 +189,34 @@ def main() -> int:
     finally:
         os.environ.pop("AEGIS_API_KEY", None)
 
-    # 20 — HMAC mint + promote (keyed)
+    # 20 — HMAC mint is a signing oracle: refuse when API auth is unset
     os.environ["AEGIS_APPROVE_KEY"] = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+    os.environ.pop("AEGIS_API_KEY", None)
     try:
         r = c.post("/api/approve/mint",
                    json={"approver": "noc-lead", "bundle_sha256": sha, "ttl_sec": 600})
+        check("mint.hmac_no_api.503", r.status_code == 503, str(r.status_code))
+        check("mint.hmac_no_api.msg", "AEGIS_API_KEY" in r.get_data(as_text=True),
+              r.get_data(as_text=True)[:160])
+        try:
+            _require_api_key_for_hmac()
+            check("startup.hmac_no_api.exit", False, "did not SystemExit")
+        except SystemExit as e:
+            check("startup.hmac_no_api.exit", "AEGIS_API_KEY" in str(e), str(e))
+    finally:
+        os.environ.pop("AEGIS_APPROVE_KEY", None)
+
+    # 21 — HMAC mint + promote (keyed + API auth — mint is not an open oracle)
+    os.environ["AEGIS_APPROVE_KEY"] = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+    os.environ["AEGIS_API_KEY"] = "ci-test-key"
+    auth = {"X-Aegis-Key": "ci-test-key"}
+    try:
+        r = c.post("/api/approve/mint",
+                   json={"approver": "noc-lead", "bundle_sha256": sha, "ttl_sec": 600})
+        check("mint.keyed.no_header.401", r.status_code == 401, str(r.status_code))
+        r = c.post("/api/approve/mint",
+                   json={"approver": "noc-lead", "bundle_sha256": sha, "ttl_sec": 600},
+                   headers=auth)
         check("mint.keyed.200", r.status_code == 200, f"{r.status_code} {r.get_data(as_text=True)[:160]}")
         minted_body = r.get_json() or {}
         minted = minted_body.get("token") if r.status_code == 200 else None
@@ -203,7 +226,8 @@ def main() -> int:
         if bundle:
             r = c.post("/api/preflight/promote",
                        json={"bundle": bundle, "approver": "noc-lead",
-                             "approval_token": "tok-123", "connector": "dry_run"})
+                             "approval_token": "tok-123", "connector": "dry_run"},
+                       headers=auth)
             tier = (bundle.get("change") or {}).get("risk_tier")
             decision = (bundle.get("verdict") or {}).get("decision")
             needs = decision == "needs_approval" or tier in ("medium", "high")
@@ -212,7 +236,8 @@ def main() -> int:
             if minted:
                 r = c.post("/api/preflight/promote",
                            json={"bundle": bundle, "approver": "noc-lead",
-                                 "approval_token": minted, "connector": "dry_run"})
+                                 "approval_token": minted, "connector": "dry_run"},
+                           headers=auth)
                 if decision == "blocked":
                     check("promote.hmac.blocked.403", r.status_code == 403, str(r.status_code))
                 else:
@@ -224,7 +249,8 @@ def main() -> int:
                           str(rec.get("approval")))
         if bundle:
             r = c.post("/api/approve/mint",
-                       json={"approver": "noc-lead", "bundle": bundle, "ttl_sec": 600})
+                       json={"approver": "noc-lead", "bundle": bundle, "ttl_sec": 600},
+                       headers=auth)
             check("mint.v2.bundle.200", r.status_code == 200,
                   f"{r.status_code} {r.get_data(as_text=True)[:160]}")
             minted_v2 = (r.get_json() or {}) if r.status_code == 200 else {}
@@ -239,12 +265,14 @@ def main() -> int:
             tampered = dict(bundle)
             tampered["change"] = dict(bundle.get("change") or {}, risk_tier="low")
             r = c.post("/api/approve/mint",
-                       json={"approver": "noc-lead", "bundle": tampered, "ttl_sec": 600})
+                       json={"approver": "noc-lead", "bundle": tampered, "ttl_sec": 600},
+                       headers=auth)
             check("mint.v2.tampered.422", r.status_code == 422, str(r.status_code))
             if tok_v2:
                 r = c.post("/api/preflight/promote",
                            json={"bundle": bundle, "approver": "noc-lead",
-                                 "approval_token": tok_v2, "connector": "dry_run"})
+                                 "approval_token": tok_v2, "connector": "dry_run"},
+                           headers=auth)
                 decision = (bundle.get("verdict") or {}).get("decision")
                 if decision == "blocked":
                     check("promote.v2.blocked.403", r.status_code == 403, str(r.status_code))
@@ -258,7 +286,8 @@ def main() -> int:
                 r = c.post("/api/preflight/promote",
                            json={"bundle": bundle, "approver": "noc-lead",
                                  "approval_token": tok_v2, "connector": "dry_run",
-                                 "inventory_sha256": "ff" * 32})
+                                 "inventory_sha256": "ff" * 32},
+                           headers=auth)
                 tier = (bundle.get("change") or {}).get("risk_tier")
                 needs = decision == "needs_approval" or tier in ("medium", "high")
                 if needs:
@@ -268,6 +297,7 @@ def main() -> int:
                           r.get_data(as_text=True)[:160])
     finally:
         os.environ.pop("AEGIS_APPROVE_KEY", None)
+        os.environ.pop("AEGIS_API_KEY", None)
 
     if FAILS:
         print("\n=== API ENDPOINT TEST: FAIL ===")

@@ -80,7 +80,7 @@ def _load_signer() -> Ed25519Signer:
     used. Production swaps this for a YubiKey-PIV signer (same Signer protocol).
 
     T1 #10: a pinned seal key without API auth is refused — unauthenticated deployments
-    must never mint pinned-key seals.
+    must never mint pinned-key seals. HMAC mint is the same class of oracle.
     """
     raw = (os.environ.get("AEGIS_SEAL_KEY") or "").strip()
     if raw and not _api_key():
@@ -100,9 +100,23 @@ def _load_signer() -> Ed25519Signer:
     return Ed25519Signer.generate()
 
 
+def _require_api_key_for_hmac() -> None:
+    """HMAC mint is a signing oracle — refuse to start without API auth.
+
+    Same class as pinned AEGIS_SEAL_KEY without AEGIS_API_KEY: an unauthenticated
+    POST /api/approve/mint would emit valid G2/G3 tokens for any bundle hash.
+    """
+    if hmac_configured() and not _api_key():
+        raise SystemExit(
+            "[aegis.auth] AEGIS_APPROVE_KEY is set but AEGIS_API_KEY is unset; "
+            "refusing to mint HMAC approvals on an unauthenticated server"
+        )
+
+
 _SIGNER = _load_signer()
 _VERIFIER: Ed25519Verifier = _SIGNER.verifier()
 load_approve_key()  # SystemExit if AEGIS_APPROVE_KEY is set but unusable
+_require_api_key_for_hmac()
 
 
 @app.after_request
@@ -260,6 +274,11 @@ def approve_mint():
     if not hmac_configured():
         return jsonify({"error": "AEGIS_APPROVE_KEY is unset — HMAC minting refused "
                                  "(asserted-unverified mode)"}), 503
+    if not _api_key():
+        # Request-time twin of _require_api_key_for_hmac: env is read live, so a
+        # process that gained APPROVE_KEY after import must still refuse the oracle.
+        return jsonify({"error": "AEGIS_APPROVE_KEY is set but AEGIS_API_KEY is unset — "
+                                 "refusing to mint HMAC approvals on an unauthenticated server"}), 503
     data = request.get_json(silent=True) or {}
     bundle = data.get("bundle")
     try:

@@ -342,7 +342,7 @@ token in hand.
 - `core/promote/promote.py` writes `approval.method` + `token_sha256` (never the raw
   token). Empty `generated_configs` is `PromoteDenied`.
 - `serve.py` — `X-Aegis-Key` on mutating routes when `AEGIS_API_KEY` is set. Pinned
-  `AEGIS_SEAL_KEY` without an API key is `SystemExit`. New:
+  `AEGIS_SEAL_KEY` or set `AEGIS_APPROVE_KEY` without an API key is `SystemExit`. New:
   `GET /api/status`, `POST /api/approve/mint`, `POST /api/preflight/promote`.
 - Tests: `tests/tokens_test.py` in CI; promote P8; api_test auth + mint + promote.
 
