@@ -30,7 +30,8 @@ from aegis.core.seal import Ed25519Signer, Ed25519Verifier, seal_response, verif
 from aegis.core.promote.promote import promote, PromoteDenied
 from aegis.core.promote.connectors import get_connector
 from aegis.core.promote.tokens import (
-    TokenError, hmac_configured, mint_token, load_approve_key,
+    TokenError, hmac_configured, mint_token, mint_token_for_bundle,
+    digests_from_bundle, load_approve_key,
 )
 
 _UI = os.path.join(os.path.dirname(__file__), "ui", "preflight_screen.html")
@@ -252,7 +253,7 @@ def evidence_cab():
 
 @app.post("/api/approve/mint")
 def approve_mint():
-    """Mint an HMAC approval token bound to a bundle hash. Requires AEGIS_APPROVE_KEY."""
+    """Mint an HMAC approval token. A ``bundle`` body emits v2; hash-only stays v1."""
     denied = _guard_api()
     if denied:
         return denied
@@ -260,20 +261,49 @@ def approve_mint():
         return jsonify({"error": "AEGIS_APPROVE_KEY is unset — HMAC minting refused "
                                  "(asserted-unverified mode)"}), 503
     data = request.get_json(silent=True) or {}
+    bundle = data.get("bundle")
     try:
+        ttl = int(data.get("ttl_sec") or 14400)
+        who = data.get("approver") or ""
+        if isinstance(bundle, dict):
+            if not bundler_verify(bundle):
+                return jsonify({"error": "bundle integrity verification failed "
+                                         "(content does not match integrity.sha256)"}), 422
+            token = mint_token_for_bundle(who, bundle, ttl_sec=ttl)
+            digest, cfg, inv = digests_from_bundle(bundle)
+            return jsonify({
+                "token": token,
+                "alg": "hmac-sha256",
+                "version": 2,
+                "bound_to": digest,
+                "config_sha256": cfg,
+                "inventory_sha256": inv,
+                "approver": who.strip(),
+            })
         token = mint_token(
-            approver=data.get("approver") or "",
+            approver=who,
             bundle_sha256=data.get("bundle_sha256") or "",
-            ttl_sec=int(data.get("ttl_sec") or 14400),
+            ttl_sec=ttl,
+            config_sha256=data.get("config_sha256") or None,
+            inventory_sha256=data.get("inventory_sha256") or None,
         )
     except (TokenError, TypeError, ValueError) as e:
         return jsonify({"error": str(e)}), 400
-    return jsonify({
+    digest = (data.get("bundle_sha256") or "").strip().lower()
+    cfg = (data.get("config_sha256") or "").strip().lower() or None
+    inv = (data.get("inventory_sha256") or "").strip().lower() or None
+    version = 2 if (cfg and inv) else 1
+    body = {
         "token": token,
         "alg": "hmac-sha256",
-        "bound_to": (data.get("bundle_sha256") or "").strip().lower(),
+        "version": version,
+        "bound_to": digest,
         "approver": (data.get("approver") or "").strip(),
-    })
+    }
+    if version == 2:
+        body["config_sha256"] = cfg
+        body["inventory_sha256"] = inv
+    return jsonify(body)
 
 
 @app.post("/api/preflight/promote")
@@ -296,6 +326,7 @@ def preflight_promote():
             approver=data.get("approver"),
             approval_token=data.get("approval_token"),
             allow_live=allow_live,
+            live_inventory_sha256=data.get("inventory_sha256"),
         )
     except PromoteDenied as e:
         return jsonify({"error": str(e), "denied": True}), 403

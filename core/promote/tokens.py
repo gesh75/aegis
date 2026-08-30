@@ -286,15 +286,22 @@ def verify_approval(approver: str | None, token: str | None, bundle_sha256: str,
     if payload.get("b") != digest:
         return Approval(False, "none", "token is not bound to this bundle hash", hashed)
     if payload.get("v") == 2:
+        claim_c = payload.get("c")
+        claim_inv = payload.get("inv")
+        if not isinstance(claim_c, str) or not isinstance(claim_inv, str):
+            return Approval(False, "none",
+                            "v2 token missing config or inventory claim", hashed)
         cfg = (config_sha256 or "").strip().lower()
         inv = (inventory_sha256 or "").strip().lower()
         if not cfg or not inv:
             return Approval(False, "none",
                             "v2 token requires config and inventory hashes", hashed)
-        if payload.get("c") != cfg:
+        if claim_c != cfg:
             return Approval(False, "none",
                             "token is not bound to this config hash", hashed)
-        if payload.get("inv") != inv:
+        if claim_inv != inv:
             return Approval(False, "none",
                             "token is not bound to this inventory", hashed)
+        return Approval(True, "hmac-sha256",
+                        "HMAC verified, bound to bundle, config, and inventory", hashed)
     return Approval(True, "hmac-sha256", "HMAC verified, bound to bundle hash", hashed)

@@ -31,6 +31,11 @@ operators can see fail-closed behavior that is already in the code.
   contract suite treats it as zero sessions (`bgp_up == 0`).
 
 ### Security
+- **HMAC v2 config + inventory binding** (#24): `mint_token_for_bundle()` and
+  `POST /api/approve/mint` with a `bundle` emit v2 tokens bound to the grounded-config
+  hash and target inventory fingerprint. G2/G3 deny on config or inventory drift.
+  `POST /api/preflight/promote` accepts `inventory_sha256` as a live override.
+  Hash-only mint still emits v1. Unknown versions fail closed.
 - **HMAC-signed approval tokens** (T1 #9): when `AEGIS_APPROVE_KEY` is set, G2/G3 require
   an `aegis1.<payload>.<mac>` token bound to the bundle sha256, the approver, and an
   expiry. A random non-empty string is a deny. Unset key stays the honesty tier

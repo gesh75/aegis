@@ -25,7 +25,7 @@ from ..core.orchestrator.pipeline import run_preflight
 from ..core.backends.simulator import SimulatorBackend
 from ..core.promote.promote import promote, PromoteDenied, _sha256
 from ..core.promote.connectors import DryRunConnector, DisabledLiveConnector
-from ..core.promote.tokens import mint_token
+from ..core.promote.tokens import mint_token, mint_token_for_bundle
 
 INTENTS = [
     "add vlan {n} to leaf-{n} and peer bgp",                       # mostly ship/needs
@@ -101,6 +101,8 @@ def run(n: int = 4000) -> dict:
     hmac_random_promoted = False
     hmac_bound_ok = False
     hmac_method = ""
+    hmac_v2_ok = False
+    hmac_v2_drift_denied = False
     os.environ["AEGIS_APPROVE_KEY"] = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
     try:
         need = clean if clean["verdict"]["decision"] != "blocked" else None
@@ -131,12 +133,40 @@ def run(n: int = 4000) -> dict:
                     fails.append("HMAC promotion record hash mismatch")
             except PromoteDenied as e:
                 fails.append(f"bound HMAC token denied: {e}")
+            # P8 v2: bound token still promotes; live inventory N+1 is a deny.
+            try:
+                tok_v2 = mint_token_for_bundle("noc-lead", need)
+                rec_v2 = promote(need, connector=DryRunConnector(), approver="noc-lead",
+                                 approval_token=tok_v2, allow_live=False)
+                hmac_v2_ok = (rec_v2.get("approval") or {}).get("method") == "hmac-sha256"
+                if not hmac_v2_ok:
+                    fails.append(f"v2 bound token method={(rec_v2.get('approval') or {}).get('method')!r}")
+                if rec_v2.get("approval", {}).get("live_inventory_sha256"):
+                    fails.append("live inventory recorded when none was supplied")
+            except PromoteDenied as e:
+                fails.append(f"v2 bound HMAC token denied: {e}")
+            try:
+                promote(need, connector=DryRunConnector(), approver="noc-lead",
+                        approval_token=tok_v2, allow_live=False,
+                        live_inventory_sha256="ff" * 32)
+                tier = need["change"]["risk_tier"]
+                decision = need["verdict"]["decision"]
+                if decision == "needs_approval" or tier in ("medium", "high"):
+                    fails.append("v2 token promoted after live inventory drift")
+            except PromoteDenied as e:
+                hmac_v2_drift_denied = "inventory" in str(e).lower()
+                if not hmac_v2_drift_denied:
+                    fails.append(f"v2 drift deny reason: {e}")
+            except NameError:
+                fails.append("v2 token was not minted")
     finally:
         os.environ.pop("AEGIS_APPROVE_KEY", None)
 
     return {"results": res, "live_refused_without_optin": live_refused,
             "hmac_random_refused": not hmac_random_promoted,
             "hmac_bound_ok": hmac_bound_ok,
+            "hmac_v2_ok": hmac_v2_ok,
+            "hmac_v2_drift_denied": hmac_v2_drift_denied,
             "sample_failures": fails[:10]}
 
 
@@ -148,6 +178,8 @@ def passed(s: dict) -> bool:
             and s["live_refused_without_optin"]
             and s.get("hmac_random_refused", False)
             and s.get("hmac_bound_ok", False)
+            and s.get("hmac_v2_ok", False)
+            and s.get("hmac_v2_drift_denied", False)
             and not s["sample_failures"])
 
 
