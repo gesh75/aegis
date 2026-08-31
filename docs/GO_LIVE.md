@@ -3,6 +3,10 @@
 How to run a **real** PreFlight (real LLM config-gen + a real containerlab twin), and how to
 read the result. Sim mode needs none of this; this is only for `mode: live`.
 
+Community sim-tier HMAC mint / promote / OSCAL / CAB live on `:8088` (`python -m aegis.serve`),
+not on this `:5757` product. Pair `AEGIS_APPROVE_KEY` with `AEGIS_API_KEY` — HMAC-only is
+an unauthenticated mint. Runbook: [DEVELOPER.md §7](DEVELOPER.md).
+
 > **Where live is easy:** on **Linux**, `containerlab` is a native binary, so twin spawn is
 > a plain subprocess and "just works". On **macOS** there is no host clab binary — it runs
 > as a Docker image, which AEGIS supports but with Docker-Desktop caveats (below). AEGIS's
