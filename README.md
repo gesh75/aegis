@@ -182,9 +182,10 @@ docs/                ARCHITECTURE.md · COMPLIANCE.md · DEVELOPER.md · EVIDENC
 Every phase — research → positioning → scaffold → live adapters → twin endpoints → UI →
 evidence PDF → config-import → mgmt isolation → packaging → Phase 2 promotion gate — is
 logged in [`docs/PHASES.md`](docs/PHASES.md). Changelog: [`CHANGELOG.md`](CHANGELOG.md).
-Developer pitfalls (air-gap URLs, IPv6 BGP parser, DISA peer binding, seal key):
-[`docs/DEVELOPER.md`](docs/DEVELOPER.md).
-Auditor verify runbook (sha256 vs Ed25519): [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
+Developer pitfalls (air-gap URLs, IPv6 BGP parser, DISA peer binding, seal key,
+HMAC mint/promote): [`docs/DEVELOPER.md`](docs/DEVELOPER.md).
+Auditor verify runbook (sha256 vs Ed25519) and OSCAL/CAB honesty:
+[`docs/EVIDENCE.md`](docs/EVIDENCE.md).
 
 ## License
 

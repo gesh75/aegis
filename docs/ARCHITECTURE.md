@@ -38,6 +38,8 @@ Bounded-autonomy layers sit beside that loop and are sealed into every bundle:
 8. [LLM Egress & Air-Gap Wedge](#8-llm-egress--air-gap-wedge)
 9. [Authority Model (severity × ceiling)](#9-authority-model-severity--ceiling)
 10. [Detached CROSS-3 Seal](#10-detached-cross-3-seal)
+11. [Evidence exports (OSCAL / CAB)](#11-evidence-exports-oscal--cab)
+12. [HMAC approvals (community server)](#12-hmac-approvals-community-server)
 
 ---
 
@@ -123,6 +125,8 @@ flowchart TB
         BUND["bundler.py - sha256 seal, egress none"]:::data
         COMP["compliance.py - 11-framework crosswalk"]:::accent
         PDF["pdf.py - examiner-ready PDF"]:::accent
+        OSCAL["oscal.py - AR JSON export"]:::accent
+        CAB["cab.py - CAB one-pager"]:::accent
         SCHEMA["schema - evidence_bundle.schema.json"]:::data
     end
 
@@ -133,6 +137,7 @@ flowchart TB
     subgraph PROM["core/promote - Phase 2 gate"]
         direction LR
         GATE["gate.py - G1-G5 rules"]:::accent
+        TOK["tokens.py - HMAC v1"]:::accent
         PROMO["promote.py - sealed promotion record"]:::accent
         CONN["connectors.py - DryRun default, live inert"]:::edge
     end
@@ -151,9 +156,12 @@ flowchart TB
     PIPE --> BUND
     BUND --> SCHEMA
     BUND --> PDF
+    BUND --> OSCAL
+    BUND --> CAB
     BUND --> RCPT
     BUND --> GATE
     GATE --> AUTH
+    GATE --> TOK
     GATE --> PROMO
     PROMO --> CONN
 
@@ -312,11 +320,22 @@ stateDiagram-v2
     Record --> [*]
 ```
 
+**G2 / G3 tokens** come from `core/promote/tokens.py`. When `AEGIS_APPROVE_KEY` is set,
+the pair must be an `aegis1.` HMAC bound to this bundle's sha256 + the approver + an
+expiry. When the key is unset, any non-empty pair is recorded as `asserted-unverified`.
+G1 is `bundler.verify` only — the gate does not call `verify_seal`. Operator curl
+path: [DEVELOPER.md §7](DEVELOPER.md).
+
 **G5 (no-self-escalation)** re-derives the autonomy ceiling at promote time from
 `AEGIS_MAX_AUTHORIZED_TIER` (default `HOTL`). It does **not** trust a recorded `allowed`
 boolean. A missing `change.authority` record, an unrecognized `required` tier, or a required
 tier above the ceiling is denied. Fabric-identity changes (AS / RD / RT) require `BLOCK` and
 are therefore never promotable under a valid ceiling.
+
+Empty `change.generated_configs` is denied in `promote()` (`nothing to promote`) before
+`evaluate()` runs. The default connector is `DryRunConnector` (`live=False`).
+`connector=live` is `DisabledLiveConnector` — even with `AEGIS_PROMOTE_ALLOW_LIVE=1`
+it refuses to push.
 
 ---
 
@@ -329,16 +348,18 @@ are therefore never promotable under a valid ceiling.
 | **AI (only step)** | Self-hosted Qwen3 / Ollama via `core/llm` (OpenAI-compat local; cloud dropped when `AEGIS_AIRGAP=1`) |
 | **Twin** | containerlab + Docker (srlinux / ceos / frr / junos / ios / panos) |
 | **Static analysis** | Batfish-style check via DCN_Network_Tool `:5757` |
-| **Evidence** | `hashlib` sha256 seal · canonical JSON · JSON Schema draft-07 · `jsonschema` 3.2.0 |
+| **Evidence** | `hashlib` sha256 integrity · canonical JSON · JSON Schema draft-07 · `jsonschema` 3.2.0 · OSCAL AR + CAB JSON exports |
 | **Authority** | `core/risk/authority.py` — severity × change-class → AUTO / HITL / HOTL / BLOCK |
 | **Detached seal** | Ed25519 receipt (`core/seal`) binding model identity + ceiling + bundle hash |
+| **Approvals** | HMAC-SHA256 v1 tokens (`core/promote/tokens.py`) when `AEGIS_APPROVE_KEY` is set |
 | **PDF** | `reportlab` (A4 platypus tables) — air-gap safe; integrity verified before render |
 | **Server / UI** | Flask 3.x (loopback-bound, strict CSP, 2 MB cap) · single inline-asset HTML |
 | **Networking** | `urllib` (HttpBackend) + raw `httpx` (LLM egress) — no cloud SDK import |
-| **CI / tests** | 7 workflow suites (`stress`, `promote`, `twin`, `pdf`, `contract`, `api`, `compliance`) |
+| **CI / tests** | 9 workflow suites (`stress`, `promote`, `twin`, `pdf`, `contract`, `tokens`, `oscal`, `api`, `compliance`) |
 
-Operator env, parser contracts, and fail-closed pitfalls live in
+Operator env, HMAC mint/promote, parser contracts, and fail-closed pitfalls live in
 **[DEVELOPER.md](DEVELOPER.md)**. Live twin bring-up is still **[GO_LIVE.md](GO_LIVE.md)**.
+Auditor verify (sha256 vs Ed25519) and export honesty: **[EVIDENCE.md](EVIDENCE.md)**.
 
 ---
 
@@ -416,8 +437,41 @@ bundle cannot be promoted.
 `seal_bundle` refuses a tampered bundle or one whose change exceeds the ceiling. Community
 `serve.py` signs with Ed25519: a 64-hex `AEGIS_SEAL_KEY` pins a stable seed; a missing key
 uses an ephemeral demo key; an **invalid** pinned key is `SystemExit` (no silent fallback).
-`POST /api/preflight/evidence/pdf` re-verifies integrity and returns **422** on a forged
-bundle. Offline verify is `GET /api/seal/pubkey` + `POST /api/seal/verify`.
+`POST /api/preflight/evidence/pdf` re-verifies integrity and returns **422** when the
+body no longer matches `integrity.sha256`. That is self-consistency, not origin
+proof — `verify_seal` is not called. Offline authenticity is `GET /api/seal/pubkey`
++ `POST /api/seal/verify`. A pinned `AEGIS_SEAL_KEY` without `AEGIS_API_KEY` is
+`SystemExit`.
+
+---
+
+## 11. Evidence exports (OSCAL / CAB)
+
+Two JSON renderings sit beside the PDF. Both go through `_verified_bundle`
+(API key when set + sha present + `bundler.verify`). Neither calls `verify_seal`.
+The pure functions (`to_oscal`, `to_cab`) do not verify — the HTTP layer does.
+
+| Route | `kind` | Honest limit |
+|---|---|---|
+| `POST /api/preflight/evidence/oscal` | `aegis-oscal-ar-v1` | OSCAL 1.1.2 *structure*. `metadata.remarks` says this is not a FedRAMP package. Fail rows → findings. |
+| `POST /api/preflight/evidence/cab` | `aegis-cab-v1` | CAB one-pager. `rollback.verified_in_twin` is always false. `intents_that_hold` is false on `blocked` / `guard_rejected` or a non-converged twin. |
+
+Field-level contract and curl: [EVIDENCE.md](EVIDENCE.md) §§4–5.
+
+---
+
+## 12. HMAC approvals (community server)
+
+`POST /api/approve/mint` and `POST /api/preflight/promote` are on `serve.py`.
+v1 tokens bind approver + bundle sha256 + expiry (`v: 1`). They do not bind
+grounded config or live inventory.
+
+`GET /api/status` reports `{api_auth, approve_hmac, seal, egress}` with no secrets.
+
+Constraint: `AEGIS_APPROVE_KEY` without `AEGIS_API_KEY` leaves mint and promote
+reachable with no `X-Aegis-Key`. That pairing is an unauthenticated signing
+oracle — set both keys, or leave HMAC unset for `asserted-unverified`. Runbook:
+[DEVELOPER.md §7](DEVELOPER.md).
 
 ---
 

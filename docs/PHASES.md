@@ -343,6 +343,8 @@ token in hand.
 - `serve.py` — `X-Aegis-Key` on mutating routes when `AEGIS_API_KEY` is set. Pinned
   `AEGIS_SEAL_KEY` without an API key is `SystemExit`. New:
   `GET /api/status`, `POST /api/approve/mint`, `POST /api/preflight/promote`.
+  HMAC key **without** an API key still leaves mint reachable (pairing hole; do
+  not run that combo). Operator path: `docs/DEVELOPER.md` §7.
 - Tests: `tests/tokens_test.py` in CI; promote P8; api_test auth + mint + promote.
 
 ### OSCAL AR + CAB export  ·  2026-08-29
