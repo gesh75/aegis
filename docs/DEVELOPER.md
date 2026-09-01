@@ -211,13 +211,13 @@ curl -s -X POST http://127.0.0.1:8088/api/preflight/run \
 
 SHA=$(jq -r '.integrity.sha256' /tmp/aegis-bundle.json)
 
-# 2. mint — bound to this hash + this approver
-curl -s -X POST http://127.0.0.1:8088/api/approve/mint \
+# 2. mint — bound to this hash + this approver; capture the token
+TOKEN=$(curl -s -X POST http://127.0.0.1:8088/api/approve/mint \
   -H "Content-Type: application/json" -H "X-Aegis-Key: $KEY" \
-  -d "{\"approver\":\"noc-lead\",\"bundle_sha256\":\"$SHA\",\"ttl_sec\":600}"
-# 200 {"token":"aegis1.…","alg":"hmac-sha256","bound_to":"<sha>","approver":"noc-lead"}
-# 400 approver / sha / ttl rejected   401 missing or wrong X-Aegis-Key
-# 503 AEGIS_APPROVE_KEY unset
+  -d "{\"approver\":\"noc-lead\",\"bundle_sha256\":\"$SHA\",\"ttl_sec\":600}" \
+  | jq -r .token)
+# 200 token=aegis1.…   400 approver / sha / ttl rejected
+# 401 missing or wrong X-Aegis-Key   503 AEGIS_APPROVE_KEY unset
 
 # 3. promote — default connector is dry_run (records, mutates nothing)
 curl -s -X POST http://127.0.0.1:8088/api/preflight/promote \
