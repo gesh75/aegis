@@ -132,8 +132,8 @@ The seal (`core/seal/seal.py`) additionally refuses to certify an unbounded chan
 | POST | `/api/preflight/evidence/pdf` | Integrity must verify or **422**. Auth when key set. |
 | POST | `/api/preflight/evidence/oscal` | OSCAL-shaped AR JSON. Same integrity gate. Not FedRAMP. |
 | POST | `/api/preflight/evidence/cab` | CAB one-pager. Rollback is a plan, not a verified execution. |
-| POST | `/api/approve/mint` | HMAC token bound to `bundle_sha256`. **503** if HMAC unset. |
-| POST | `/api/preflight/promote` | Gate G1–G5 then dry-run (default). **403** on deny. |
+| POST | `/api/approve/mint` | HMAC token. Body `{bundle}` → **v2** (config + inventory). Hash-only → **v1**. Tampered bundle → **422**. **503** if HMAC unset. |
+| POST | `/api/preflight/promote` | Gate G1–G5 then dry-run (default). Optional `inventory_sha256` live override. **403** on deny. |
 | GET | `/api/seal/pubkey` | Offline verify material (public). |
 | POST | `/api/seal/verify` | Body `{bundle, seal}` (public). |
 

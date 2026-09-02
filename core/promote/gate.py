@@ -9,9 +9,10 @@ Rules (all must hold to ALLOW):
   G4  live:      using the live connector additionally requires explicit opt-in (allow_live)
   G5  ceiling:   re-derive required ≤ max_authorized at promote time. No self-escalation.
 
-Approval tokens (T1 #9): when ``AEGIS_APPROVE_KEY`` is set, G2/G3 require an HMAC-SHA256
-token bound to this bundle's sha256 + the approver identity + an expiry. A random
-non-empty string is a deny. When the key is unset the pair is recorded as
+Approval tokens (T1 #9 / #24): when ``AEGIS_APPROVE_KEY`` is set, G2/G3 require an
+HMAC-SHA256 token bound to this bundle's sha256 + the approver identity + an expiry.
+v2 tokens also bind the grounded-config hash and the target inventory fingerprint.
+A random non-empty string is a deny. When the key is unset the pair is recorded as
 ``asserted-unverified`` so the honesty tier is visible on the promotion record.
 """
 from __future__ import annotations
@@ -19,7 +20,7 @@ from dataclasses import dataclass
 
 from ...evidence.bundler import verify
 from ..risk import Tier, authorize, load_max_authorized
-from .tokens import verify_approval
+from .tokens import config_digest, inventory_digest, verify_approval
 
 
 @dataclass(frozen=True)
@@ -31,14 +32,18 @@ class GateDecision:
 
 
 def evaluate(bundle: dict, *, approver: str | None, approval_token: str | None,
-             connector_is_live: bool, allow_live: bool) -> GateDecision:
+             connector_is_live: bool, allow_live: bool,
+             live_inventory_sha256: str | None = None) -> GateDecision:
     if not verify(bundle):                                             # G1
         return GateDecision(False, "integrity check failed — bundle tampered or malformed")
 
     decision = bundle.get("verdict", {}).get("decision")
     tier = bundle.get("change", {}).get("risk_tier")
     digest = (bundle.get("integrity") or {}).get("sha256") or ""
-    approval = verify_approval(approver, approval_token, digest)
+    cfg = config_digest(bundle)
+    inv = (live_inventory_sha256 or "").strip().lower() or inventory_digest(bundle)
+    approval = verify_approval(approver, approval_token, digest,
+                               config_sha256=cfg, inventory_sha256=inv)
     has_approval = approval.ok
 
     def _deny(reason: str) -> GateDecision:

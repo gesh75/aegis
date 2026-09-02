@@ -18,8 +18,8 @@ API client depend on:
   12  bundle egress is always "none"   (air-gap invariant, surfaced over HTTP)
   16  GET  /api/status                 -> approve_hmac asserted-unverified (no key)
   17  API key required when set        -> 401 without header, 200 with X-Aegis-Key
-  18  HMAC mint                        -> 503 unset; 200 bound token when keyed
-  19  Promote                          -> 403 on random token under HMAC; 200 bound
+  18  HMAC mint                        -> 503 unset; 200 v1 when keyed; 200 v2 when bundle given
+  19  Promote                          -> 403 on random token under HMAC; 200 bound; v2 drift 403
 
 Usage:  python3 -m aegis.tests.api_test
 """
@@ -195,9 +195,11 @@ def main() -> int:
         r = c.post("/api/approve/mint",
                    json={"approver": "noc-lead", "bundle_sha256": sha, "ttl_sec": 600})
         check("mint.keyed.200", r.status_code == 200, f"{r.status_code} {r.get_data(as_text=True)[:160]}")
-        minted = (r.get_json() or {}).get("token") if r.status_code == 200 else None
+        minted_body = r.get_json() or {}
+        minted = minted_body.get("token") if r.status_code == 200 else None
         check("mint.keyed.shape", isinstance(minted, str) and minted.startswith("aegis1."),
               str(minted)[:40])
+        check("mint.keyed.v1", minted_body.get("version") == 1, str(minted_body.get("version")))
         if bundle:
             r = c.post("/api/preflight/promote",
                        json={"bundle": bundle, "approver": "noc-lead",
@@ -220,6 +222,50 @@ def main() -> int:
                     check("promote.hmac.bound.method",
                           (rec.get("approval") or {}).get("method") == "hmac-sha256",
                           str(rec.get("approval")))
+        if bundle:
+            r = c.post("/api/approve/mint",
+                       json={"approver": "noc-lead", "bundle": bundle, "ttl_sec": 600})
+            check("mint.v2.bundle.200", r.status_code == 200,
+                  f"{r.status_code} {r.get_data(as_text=True)[:160]}")
+            minted_v2 = (r.get_json() or {}) if r.status_code == 200 else {}
+            check("mint.v2.version", minted_v2.get("version") == 2, str(minted_v2.get("version")))
+            check("mint.v2.claims",
+                  len(minted_v2.get("config_sha256") or "") == 64
+                  and len(minted_v2.get("inventory_sha256") or "") == 64,
+                  str({k: minted_v2.get(k) for k in ("config_sha256", "inventory_sha256")}))
+            tok_v2 = minted_v2.get("token")
+            check("mint.v2.shape", isinstance(tok_v2, str) and tok_v2.startswith("aegis1."),
+                  str(tok_v2)[:40])
+            tampered = dict(bundle)
+            tampered["change"] = dict(bundle.get("change") or {}, risk_tier="low")
+            r = c.post("/api/approve/mint",
+                       json={"approver": "noc-lead", "bundle": tampered, "ttl_sec": 600})
+            check("mint.v2.tampered.422", r.status_code == 422, str(r.status_code))
+            if tok_v2:
+                r = c.post("/api/preflight/promote",
+                           json={"bundle": bundle, "approver": "noc-lead",
+                                 "approval_token": tok_v2, "connector": "dry_run"})
+                decision = (bundle.get("verdict") or {}).get("decision")
+                if decision == "blocked":
+                    check("promote.v2.blocked.403", r.status_code == 403, str(r.status_code))
+                else:
+                    rec = r.get_json() if r.status_code == 200 else {}
+                    check("promote.v2.bound.200", r.status_code == 200,
+                          f"{r.status_code} {r.get_data(as_text=True)[:160]}")
+                    check("promote.v2.bound.method",
+                          (rec.get("approval") or {}).get("method") == "hmac-sha256",
+                          str(rec.get("approval")))
+                r = c.post("/api/preflight/promote",
+                           json={"bundle": bundle, "approver": "noc-lead",
+                                 "approval_token": tok_v2, "connector": "dry_run",
+                                 "inventory_sha256": "ff" * 32})
+                tier = (bundle.get("change") or {}).get("risk_tier")
+                needs = decision == "needs_approval" or tier in ("medium", "high")
+                if needs:
+                    check("promote.v2.drift.403", r.status_code == 403, str(r.status_code))
+                    check("promote.v2.drift.inventory",
+                          "inventory" in r.get_data(as_text=True),
+                          r.get_data(as_text=True)[:160])
     finally:
         os.environ.pop("AEGIS_APPROVE_KEY", None)
 

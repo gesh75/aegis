@@ -4,12 +4,17 @@ Run: python3 -m aegis.tests.tokens_test
 """
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
 import os
 import sys
 import time
 
 from ..core.promote.tokens import (
-    TokenError, mint_token, verify_approval, load_approve_key,
+    TokenError, mint_token, mint_token_for_bundle, verify_approval,
+    load_approve_key, config_digest, inventory_digest, digests_from_bundle,
 )
 
 FAILS: list[str] = []
@@ -97,6 +102,79 @@ def main() -> int:
 
         k = load_approve_key()
         check("key.loaded", isinstance(k, bytes) and len(k) >= 16, str(type(k)))
+
+        sample = {
+            "integrity": {"sha256": BUNDLE},
+            "change": {"generated_configs": [
+                {"device": "leaf-1", "vendor": "frr", "config": "vlan 10\n"},
+            ]},
+            "twin": {"topology": "clos-evpn", "engine": "containerlab",
+                     "node_count": 2, "inventory_rev": "N"},
+        }
+        digest, cfg, inv = digests_from_bundle(sample)
+        check("digest.bundle", digest == BUNDLE, digest)
+        check("digest.cfg", len(cfg) == 64 and cfg == config_digest(sample), cfg)
+        check("digest.inv", len(inv) == 64 and inv == inventory_digest(sample), inv)
+
+        v2 = mint_token_for_bundle("noc-lead", sample, ttl_sec=600)
+        check("v2.shape", v2.startswith("aegis1.") and v2.count(".") == 2, v2[:40])
+        raw = v2.split(".")[1]
+        pad = "=" * (-len(raw) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(raw + pad))
+        check("v2.payload.v", payload.get("v") == 2, str(payload.get("v")))
+        check("v2.payload.c", payload.get("c") == cfg, str(payload.get("c")))
+        check("v2.payload.inv", payload.get("inv") == inv, str(payload.get("inv")))
+
+        good_v2 = verify_approval("noc-lead", v2, digest,
+                                  config_sha256=cfg, inventory_sha256=inv)
+        check("v2.ok", good_v2.ok, good_v2.reason)
+        check("v2.method", good_v2.method == "hmac-sha256", good_v2.method)
+        check("v2.reason", "inventory" in good_v2.reason, good_v2.reason)
+
+        other_cfg = hashlib.sha256(b"other-config").hexdigest()
+        wrong_cfg = verify_approval("noc-lead", v2, digest,
+                                    config_sha256=other_cfg, inventory_sha256=inv)
+        check("v2.wrong_config", not wrong_cfg.ok
+              and "config hash" in wrong_cfg.reason, wrong_cfg.reason)
+
+        other_inv = hashlib.sha256(b"inventory-N+1").hexdigest()
+        wrong_inv = verify_approval("noc-lead", v2, digest,
+                                    config_sha256=cfg, inventory_sha256=other_inv)
+        check("v2.wrong_inventory", not wrong_inv.ok
+              and "inventory" in wrong_inv.reason, wrong_inv.reason)
+
+        missing = verify_approval("noc-lead", v2, digest)
+        check("v2.missing_live_hashes", not missing.ok
+              and "requires config and inventory" in missing.reason, missing.reason)
+
+        try:
+            mint_token("noc-lead", BUNDLE, version=2)
+            check("v2.mint.missing_claims", False, "accepted v2 without hashes")
+        except TokenError as e:
+            check("v2.mint.missing_claims", "require" in str(e).lower(), str(e))
+
+        v1 = mint_token("noc-lead", BUNDLE, ttl_sec=600)
+        still_v1 = verify_approval("noc-lead", v1, BUNDLE,
+                                   config_sha256=cfg, inventory_sha256=inv)
+        check("v1.ignores_extra_hashes", still_v1.ok, still_v1.reason)
+
+        def _b64(data: bytes) -> str:
+            return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+        raw_v3 = json.dumps({
+            "a": "noc-lead", "b": BUNDLE, "exp": int(time.time()) + 600,
+            "n": "00" * 8, "v": 3,
+        }, sort_keys=True, separators=(",", ":")).encode("ascii")
+        mac = hmac.new(k, raw_v3, hashlib.sha256).digest()
+        unknown = f"aegis1.{_b64(raw_v3)}.{_b64(mac)}"
+        bad_ver = verify_approval("noc-lead", unknown, BUNDLE)
+        check("hmac.unknown_version", not bad_ver.ok
+              and "version" in bad_ver.reason, bad_ver.reason)
+
+        moved = dict(sample)
+        moved["twin"] = dict(sample["twin"], inventory_rev="N+1")
+        drift = inventory_digest(moved)
+        check("inv.drift_changes_digest", drift != inv, drift)
 
     _with_key(_hmac_suite)
 
