@@ -20,7 +20,7 @@ Companion pages: [ARCHITECTURE.md](ARCHITECTURE.md) (maps) · [GO_LIVE.md](GO_LI
 | `AEGIS_MAX_AUTHORIZED_TIER` | `core/risk/authority.py` | `AUTO` \| `HITL` \| `HOTL`. Default `HOTL`. `BLOCK` and unknown values **raise**. |
 | `AEGIS_SEAL_KEY` | `serve.py` | 64 hex chars = pinned Ed25519 seed. Unset = ephemeral demo key. Invalid = `SystemExit`. Pinned key **requires** `AEGIS_API_KEY` (T1 #10). |
 | `AEGIS_API_KEY` | `serve.py` | When set, mutating routes require header `X-Aegis-Key`. Custom header also breaks trivial CSRF POSTs. |
-| `AEGIS_APPROVE_KEY` | `core/promote/tokens.py` | HMAC-SHA256 key for G2/G3 tokens. Hex (≥32 chars) or raw (≥16 bytes). Unset = asserted-unverified. Set-but-too-short = `SystemExit`. |
+| `AEGIS_APPROVE_KEY` | `core/promote/tokens.py` | HMAC-SHA256 key for G2/G3 tokens. Hex (≥32 chars) or raw (≥16 bytes). Unset = asserted-unverified. Set-but-too-short = `SystemExit`. Set key **requires** `AEGIS_API_KEY` (mint is a signing oracle). |
 | `AEGIS_PROMOTE_ALLOW_LIVE=1` | `core/promote/gate.py` G4 | Required in addition to a live connector. |
 | `AEGIS_HOST` / `AEGIS_PORT` | `serve.py` | Bind address (default `127.0.0.1:8088`). |
 
@@ -132,7 +132,7 @@ The seal (`core/seal/seal.py`) additionally refuses to certify an unbounded chan
 | POST | `/api/preflight/evidence/pdf` | Integrity must verify or **422**. Auth when key set. |
 | POST | `/api/preflight/evidence/oscal` | OSCAL-shaped AR JSON. Same integrity gate. Not FedRAMP. |
 | POST | `/api/preflight/evidence/cab` | CAB one-pager. Rollback is a plan, not a verified execution. |
-| POST | `/api/approve/mint` | HMAC token. Body `{bundle}` → **v2** (config + inventory). Hash-only → **v1**. Tampered bundle → **422**. **503** if HMAC unset. |
+| POST | `/api/approve/mint` | HMAC token. Body `{bundle}` → **v2** (config + inventory). Hash-only → **v1**. Tampered bundle → **422**. **503** if HMAC unset, or if HMAC is set without `AEGIS_API_KEY`. |
 | POST | `/api/preflight/promote` | Gate G1–G5 then dry-run (default). Optional `inventory_sha256` live override. **403** on deny. |
 | GET | `/api/seal/pubkey` | Offline verify material (public). |
 | POST | `/api/seal/verify` | Body `{bundle, seal}` (public). |

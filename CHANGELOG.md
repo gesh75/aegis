@@ -31,6 +31,9 @@ operators can see fail-closed behavior that is already in the code.
   contract suite treats it as zero sessions (`bgp_up == 0`).
 
 ### Security
+- **HMAC mint requires API auth**: `AEGIS_APPROVE_KEY` without `AEGIS_API_KEY` is
+  `SystemExit` at start and `503` on `POST /api/approve/mint`. Same class as pinned
+  seals — an unauthenticated mint was a signing oracle for valid G2/G3 tokens.
 - **HMAC v2 config + inventory binding** (#24): `mint_token_for_bundle()` and
   `POST /api/approve/mint` with a `bundle` emit v2 tokens bound to the grounded-config
   hash and target inventory fingerprint. G2/G3 deny on config or inventory drift.
