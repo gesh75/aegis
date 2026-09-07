@@ -1,6 +1,13 @@
 # AEGIS — PIV Hardware-Signer Plan (CROSS-3, final pass)
 
-> **Status:** plan / ready to execute when a YubiKey is in hand.
+> **Status:** Step 0 **pins only** landed on `main` (#27, 2026-09-02):
+> `core/seal/pins.py` compiles in `YUBICO_PIV_ROOT_CA_DER_SHA256` =
+> `63ece914e54dd87915f34033c85af4c0696ba1512f8add66ced738331207b546`
+> (Yubico PIV Root CA Serial 263751). `PIV_SERIAL_ALLOWLIST` is empty;
+> `PINNED_PIV_KEY_ID` is `None`. **Not landed:** `PivSigner`, PKCS#11
+> `C_Sign`, raw `r‖s` → DER helpers, attestation walker, G1a/G1b,
+> SSH/NETCONF, Batfish sidecar. `signing.py` is still software Ed25519.
+> Remaining steps still need a YubiKey in hand.
 > **Scope:** swap the CROSS-3 seal's *software* Ed25519 signer for a *hardware* YubiKey-PIV
 > signer (ECDSA-P256) whose origin is provable via the YubiKey attestation chain, and bind the
 > `max_authorized` ceiling to the same hardware root. The Ed25519 path stays as the dev/CI
@@ -84,7 +91,7 @@ Plus: bind **`max_authorized`** (the #5 ceiling) to a PIV-signed policy object s
 
 | Step | Work | HW |
 |---|---|---|
-| **0** | Add the PKCS#11 dep (`PyKCS11`); the EC sign/verify + **raw→DER** helpers; `x509` chain-validation logic — all testable with **software P-256 keys + a self-signed test chain** | — |
+| **0** | **Partial.** Compiled-in Yubico root fingerprint + empty serial allowlist (`core/seal/pins.py`). PKCS#11 dep, EC sign/verify, **raw→DER** helpers, and `x509` chain-validation logic are still open. | — (pins only) |
 | **1** | Provision the token: generate the seal key on-device in **slot 9c** (ECCP256, PIN policy, touch policy); capture the attestation chain (`ykman piv keys attest 9c` + the `f9` intermediate); export the leaf pubkey | ⚡ |
 | **2** | `PivSigner` against `libykcs11` (`C_Login` w/ PIN, `C_Sign`); first end-to-end **sign → raw→DER → `cryptography` verify** roundtrip | ⚡ |
 | **3** | `attestation.py` chain validation; obtain the **current Yubico PIV Root CA cert from developers.yubico.com**, pin its DER SHA-256, add a checked-in test asserting the pinned bytes match the reference | — |

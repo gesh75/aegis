@@ -9,6 +9,10 @@ Post-0.2.0 hardening that landed on `main` after the 0.2.0 tag. Documented here 
 operators can see fail-closed behavior that is already in the code.
 
 ### Added
+- **PIV step-0 pins** (#27): `core/seal/pins.py` compiles in the Yubico PIV Root CA
+  Serial 263751 DER SHA-256. Serial allowlist is empty; `PINNED_PIV_KEY_ID` is
+  `None`. Not a hardware signer — `PivSigner`, PKCS#11 `C_Sign`, and ECDSA
+  helpers did not land.
 - **OSCAL Assessment Results export**: `evidence/oscal.py` `to_oscal(bundle)` plus
   `POST /api/preflight/evidence/oscal`. AEGIS-shaped AR JSON (OSCAL 1.1.2 structure).
   Honest: not a FedRAMP authorization package. Integrity must verify (same 400/422
@@ -42,7 +46,8 @@ operators can see fail-closed behavior that is already in the code.
   (`asserted-unverified`) so community tests and air-gap demos keep working. Promotion
   records store `approval.method` + `approval.token_sha256` — never the raw token.
   `POST /api/approve/mint` and `POST /api/preflight/promote` are now on the community
-  server.
+  server. Known limit on `main`: HMAC without `AEGIS_API_KEY` leaves mint reachable
+  (pair the keys; see `docs/DEVELOPER.md` §7). Draft #28 is not shipped.
 - **API-key header** (T1 #10): when `AEGIS_API_KEY` is set, mutating routes require
   `X-Aegis-Key` (constant-time compare). A pinned `AEGIS_SEAL_KEY` without an API key
   refuses to start — unauthenticated deploys never mint pinned-key seals. Public:
@@ -58,8 +63,18 @@ operators can see fail-closed behavior that is already in the code.
   the detached Ed25519 receipt is origin + ceiling proof. Documents that
   `POST /api/preflight/evidence/pdf` calls `bundler.verify` only (not `verify_seal`),
   plus the auditor path (`/api/seal/pubkey`, `/api/seal/verify`, G0–G6).
-- Pages (`docs/index.html`) now advertises **v0.2.0**, G1–G5 + HMAC, 8+ CI suites,
+- Pages (`docs/index.html`) now advertises **v0.2.0**, G1–G5 + HMAC v2, 9 CI suites,
   11 frameworks, OSCAL/CAB exports, and does not call the content hash a seal.
+- **HMAC + promote runbook** (`docs/DEVELOPER.md` §7): mint/promote curl, TTL and
+  approver charset, v2 bind (config + inventory), live inventory override,
+  promotion-record shape, inert `live` connector. Documents the current pairing
+  hole: `AEGIS_APPROVE_KEY` without `AEGIS_API_KEY` leaves mint unauthenticated.
+- **OSCAL / CAB field contract** (`docs/EVIDENCE.md` §§4–5, `ARCHITECTURE.md` §11):
+  `to_oscal` / `to_cab` do not verify; HTTP layer does. `intents_that_hold` is
+  false on blocked or non-converged runs.
+- **PIV step-0 honesty** (`ARCHITECTURE.md` §13, `PIV_HARDWARE_SIGNER_PLAN.md`):
+  compiled-in Yubico root pin landed; `PivSigner` / ECDSA helpers / SSH / Batfish
+  did not. CI suite count corrected (9, not 7).
 
 ## [0.2.0] — 2026-06-12
 
