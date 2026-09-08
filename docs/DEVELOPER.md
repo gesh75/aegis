@@ -158,8 +158,8 @@ CSP is loopback-oriented; `MAX_CONTENT_LENGTH` is 2 MB.
 
 CI (`.github/workflows/test.yml`) runs **nine** modules: `stress`, `promote`, `twin`,
 `pdf`, `contract`, `tokens`, `oscal`, `api`, `compliance`. HMAC v1+v2 and OSCAL/CAB
-are in that workflow. These extra suites are **not** and lock air-gap / authority /
-seal behavior:
+are in that workflow. These extra suites are **not** in that workflow and are
+the right place to lock air-gap / authority / seal behavior:
 
 ```bash
 python -m aegis.tests.llm_egress_test

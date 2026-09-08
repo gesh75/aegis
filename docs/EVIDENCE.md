@@ -111,7 +111,7 @@ verify** — callers must. `verify_seal` is not called. Filename
 | `metadata.published` / `results[0].start` | `created_utc` or `created` |
 | `metadata.oscal-version` / `metadata.version` | `1.1.2` / `0.2.0` |
 | `results[0].description` | bundle / change `intent` |
-| `reviewed-controls.include-controls` | `validation.compliance` (fallback: top-level `compliance`) |
+| `reviewed-controls.control-selections[].include-controls` | `validation.compliance` (fallback: top-level `compliance`) |
 | `observations[]` | every control row; `methods` = `TEST` if `kind==config-checked` else `EXAMINE` |
 | `findings[]` | rows whose `status == "fail"` only |
 | `results[0].remarks` | verdict, twin id + `converged`, `integrity.sha256`, seal alg or `null`, egress |
@@ -129,9 +129,9 @@ Same `_verified_bundle` gate. **`to_cab()` does not verify.** Filename
 
 | Field | Meaning |
 |---|---|
-| `what_changed[]` | per-device `device`, `vendor`, `grounded_commands`, line count |
+| `what_changed[]` | per-device `device`, `vendor`, `grounded` (from `grounded_commands`), `lines` |
 | `twin` | id/lab, `converged`, `apply_succeeded`, `bgp` as `before→after` |
-| `intents_that_hold` | **true** only when verdict is not `blocked` / `guard_rejected` **and** the twin converged |
+| `intents_that_hold` | **true** only when verdict is present and not `blocked` / `guard_rejected` **and** the twin converged |
 | `rollback.steps` | plan from `rollback.plan` / `rollback.steps` / a top-level list |
 | `rollback.verified_in_twin` | **always `false`** |
 | `rollback.honesty` | `"plan generated; reversal was not executed in this run"` |
