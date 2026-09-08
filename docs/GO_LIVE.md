@@ -46,7 +46,13 @@ export AEGIS_LLM_MODEL=gemma4:latest
 
 # Seal: 64 hex chars pins a stable Ed25519 seed. Invalid key = process exits.
 # Missing key = ephemeral demo key (receipts do not survive restart).
+# A pinned seal key requires AEGIS_API_KEY (SystemExit otherwise).
 # export AEGIS_SEAL_KEY=<64-hex-private-seed>
+# export AEGIS_API_KEY=<shared-secret>
+
+# HMAC G2/G3 tokens. Pair with AEGIS_API_KEY — HMAC-only mint is reachable
+# with no header on current main (docs/DEVELOPER.md §7). Bundle mint is v2.
+# export AEGIS_APPROVE_KEY=<hex-or-raw-secret>
 
 # containerlab — Linux native binary:
 export AEGIS_CLAB_MODE=binary
@@ -127,6 +133,9 @@ unique name + mgmt network + `10.x` subnet, so it never collides. It is destroye
 | Idle BGP still `ok` but not `ship_ready` | command ran; no Established peer rows | expected fail-closed — `status==ok` is not a session |
 | `AEGIS_SEAL_KEY invalid … refusing to start` | pinned seal key is not 64 hex | unset for demo, or supply a valid seed |
 | `no-self-escalation` / promote 403 | required authority > ceiling, or AS/RD/RT | expected — fabric-identity is never auto-promotable |
+| promote 403 `token is not bound to this inventory` | v2 token vs drifted `inventory_sha256` / `twin.inventory_rev` | re-mint against the current bundle or live digest |
+| mint 503 `HMAC minting refused` | `AEGIS_APPROVE_KEY` unset | set the key, or use asserted-unverified (no mint) |
+| mint reachable with no `X-Aegis-Key` | HMAC set, API key unset | pair both keys; draft #28 is not on `main` |
 | `422` on evidence PDF | bundle hash does not match content | re-run PreFlight; do not edit a sealed bundle |
 | `502 … clab deploy failed` | twin couldn't deploy | the message has the reason (RAM, image, sudo) |
 | `exec: "deploy": not found` | wrong docker image cmd | already fixed — pull latest; clab cmd names the binary |

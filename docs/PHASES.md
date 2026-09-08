@@ -358,6 +358,17 @@ Closes the two remaining *software* items on Phase 3. Hardware PIV stays later.
 - `POST /api/preflight/evidence/oscal` and `/cab` — same 400/422 integrity gate as PDF.
 - Tests: `tests/oscal_test.py` in CI.
 
-Phase 3 software is closed. Remaining on this phase: YubiKey PIV
-(`docs/PIV_HARDWARE_SIGNER_PLAN.md`) when the hardware is on the desk.
+Operator runbook for mint/promote (v2 bind, pairing hole, live inventory
+override): `docs/DEVELOPER.md` §7. OSCAL/CAB field contract:
+`docs/EVIDENCE.md` §§4–5.
+
+### PIV pins (step 0)  ·  2026-09-02
+
+#27 landed `core/seal/pins.py` only — compiled-in Yubico PIV Root CA
+fingerprint. `PivSigner`, ECDSA raw→DER helpers, SSH/NETCONF, and the
+Batfish sidecar did **not** merge. Hardware signer still needs a token
+in hand (`docs/PIV_HARDWARE_SIGNER_PLAN.md`).
+
+Phase 3 software is closed except the HMAC/API pairing hole (draft #28).
+Remaining on this phase: YubiKey PIV when the hardware is on the desk.
 Live SSH/NETCONF connector, batfish sidecar, and RBAC stay later.
