@@ -97,10 +97,26 @@ do not hand a downloaded PDF to an examiner as proof of origin.
 POST /api/preflight/evidence/oscal
 ```
 
-Same 400 / 422 integrity gate as the PDF. Returns AEGIS-shaped Assessment Results
-JSON (`oscal-version: 1.1.2`). `metadata.remarks` states this is **not** a FedRAMP
-authorization package. Control rows (`validation.compliance`) become observations;
-`fail` rows become findings. `kind` is `aegis-oscal-ar-v1`.
+HTTP layer (`serve._verified_bundle`): same 400 / 422 integrity gate as the PDF
+(API key when set + sha present + `bundler.verify`). **`to_oscal()` does not
+verify** — callers must. `verify_seal` is not called. Filename
+`aegis-oscal-<12 hex of run_id>.json`.
+
+`kind: aegis-oscal-ar-v1`. Structure is OSCAL 1.1.2 Assessment Results.
+`metadata.remarks` states this is **not** a FedRAMP authorization package.
+
+| Field | Source |
+|---|---|
+| `assessment-results.uuid` | `run_id` |
+| `metadata.published` / `results[0].start` | `created_utc` or `created` |
+| `metadata.oscal-version` / `metadata.version` | `1.1.2` / `0.2.0` |
+| `results[0].description` | bundle / change `intent` |
+| `reviewed-controls.control-selections[].include-controls` | `validation.compliance` (fallback: top-level `compliance`) |
+| `observations[]` | every control row; `methods` = `TEST` if `kind==config-checked` else `EXAMINE` |
+| `findings[]` | rows whose `status == "fail"` only |
+| `results[0].remarks` | verdict, twin id + `converged`, `integrity.sha256`, seal alg or `null`, egress |
+
+Do not hand this JSON to a GRC tool as a FedRAMP / CMMC / agency ATO package.
 
 ## 5. CAB one-pager (`evidence/cab.py`)
 
@@ -108,10 +124,24 @@ authorization package. Control rows (`validation.compliance`) become observation
 POST /api/preflight/evidence/cab
 ```
 
-Same integrity gate. Payload `kind: aegis-cab-v1`: what changed, which intents still
-hold, rollback steps. `rollback.verified_in_twin` is **always false** — the reverse
-was not applied in the twin. Do not tell a CAB the rollback was proven if this flag
-is false.
+Same `_verified_bundle` gate. **`to_cab()` does not verify.** Filename
+`aegis-cab-<12 hex of run_id>.json`. Payload `kind: aegis-cab-v1`.
+
+| Field | Meaning |
+|---|---|
+| `what_changed[]` | per-device `device`, `vendor`, `grounded` (from `grounded_commands`), `lines` |
+| `twin` | id/lab, `converged`, `apply_succeeded`, `bgp` as `before→after` |
+| `intents_that_hold` | **true** only when verdict is present and not `blocked` / `guard_rejected` **and** the twin converged |
+| `rollback.steps` | plan from `rollback.plan` / `rollback.steps` / a top-level list |
+| `rollback.verified_in_twin` | **always `false`** |
+| `rollback.honesty` | `"plan generated; reversal was not executed in this run"` |
+| `compliance_fails` | control rows with `status == "fail"` |
+| `authority` / `risk_tier` | from `change` |
+| `seal_present` | `bundle.seal` is a dict (not verified here) |
+
+Do not tell a CAB the rollback was proven if `verified_in_twin` is false. Do not
+treat `intents_that_hold: false` as a renderer bug — it is the honesty flag for
+a blocked or non-converged run.
 
 ---
 

@@ -138,11 +138,13 @@ docker compose -f docker-compose.yml -f docker-compose.airgap.yml up  # network_
 ```bash
 pip install -r requirements.txt
 python -m aegis.tests.stress_test 25000      # pipeline invariants (8 invariants, adversarial)
-python -m aegis.tests.contract_test          # HttpBackend parsers vs real :5757 shapes
-python -m aegis.tests.pdf_test               # evidence PDF validity
 python -m aegis.tests.promote_test 6000      # Phase 2 approval-gate safety (G1–G5 + HMAC)
-python -m aegis.tests.tokens_test            # HMAC approval tokens (T1 #9)
+python -m aegis.tests.twin_test 8000         # twin safety + mgmt isolation
+python -m aegis.tests.pdf_test               # evidence PDF validity
+python -m aegis.tests.contract_test          # HttpBackend parsers vs real :5757 shapes
+python -m aegis.tests.tokens_test            # HMAC approval tokens (v1 + v2)
 python -m aegis.tests.oscal_test             # OSCAL AR + CAB export (integrity-gated)
+python -m aegis.tests.api_test               # Flask test-client (status / mint / promote / seal)
 python -m aegis.tests.compliance_test        # 11-framework self-tests + schema-valid bundle
 ```
 
@@ -154,7 +156,7 @@ python -m aegis.tests.compliance_test        # 11-framework self-tests + schema-
 | promotion gate | 6,000 bundles | yes |
 | Flask test-client | 10 tests | yes |
 | twin safety + mgmt isolation | 8,000 ops | yes |
-| HMAC approval tokens | 17 property checks | yes |
+| HMAC approval tokens | v1 + v2 property checks | yes |
 | OSCAL AR + CAB export | integrity-gated JSON | yes |
 | compliance frameworks | per-module `SELF_TEST` | yes |
 
@@ -182,9 +184,10 @@ docs/                ARCHITECTURE.md · COMPLIANCE.md · DEVELOPER.md · EVIDENC
 Every phase — research → positioning → scaffold → live adapters → twin endpoints → UI →
 evidence PDF → config-import → mgmt isolation → packaging → Phase 2 promotion gate — is
 logged in [`docs/PHASES.md`](docs/PHASES.md). Changelog: [`CHANGELOG.md`](CHANGELOG.md).
-Developer pitfalls (air-gap URLs, IPv6 BGP parser, DISA peer binding, seal key):
-[`docs/DEVELOPER.md`](docs/DEVELOPER.md).
-Auditor verify runbook (sha256 vs Ed25519): [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
+Developer pitfalls (air-gap URLs, IPv6 BGP parser, DISA peer binding, seal key,
+HMAC v2 mint/promote): [`docs/DEVELOPER.md`](docs/DEVELOPER.md).
+Auditor verify runbook (sha256 vs Ed25519) and OSCAL/CAB honesty:
+[`docs/EVIDENCE.md`](docs/EVIDENCE.md).
 
 ## License
 
