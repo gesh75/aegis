@@ -136,7 +136,8 @@ unique name + mgmt network + `10.x` subnet, so it never collides. It is destroye
 | promote 403 `token is not bound to this inventory` | v2 token vs drifted `inventory_sha256` / `twin.inventory_rev` | re-mint against the current bundle or live digest |
 | mint 503 `HMAC minting refused` | `AEGIS_APPROVE_KEY` unset | set the key, or use asserted-unverified (no mint) |
 | mint reachable with no `X-Aegis-Key` | HMAC set, API key unset | pair both keys; draft #28 is not on `main`. Detector: `GET /api/status` shows `api_auth=open` + `approve_hmac=required` |
-| promote **500** `RuntimeError: live production push is not implemented` | `connector=live` after G4 | expected — `DisabledLiveConnector.push` raises; use `dry_run` |
+| promote **403** `live connector blocked` | `connector=live` without `AEGIS_PROMOTE_ALLOW_LIVE=1` | expected — G4; use `dry_run` |
+| promote **200** `status: partial` + `RuntimeError: live production push is not implemented` | `connector=live` after G4 | expected — `promote()` swallows `DisabledLiveConnector.push` per device; use `dry_run` |
 | promote **400** `unknown connector` | name is not `dry_run` or `live` | only those two names exist |
 | `422` on evidence PDF | bundle hash does not match content | re-run PreFlight; do not edit a sealed bundle |
 | `502 … clab deploy failed` | twin couldn't deploy | the message has the reason (RAM, image, sudo) |

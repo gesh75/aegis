@@ -22,7 +22,7 @@ Companion pages: [ARCHITECTURE.md](ARCHITECTURE.md) (maps) · [GO_LIVE.md](GO_LI
 | `AEGIS_SEAL_KEY` | `serve.py` | 64 hex chars = pinned Ed25519 seed. Unset = ephemeral demo key. Invalid = `SystemExit`. Pinned key **requires** `AEGIS_API_KEY` (T1 #10). |
 | `AEGIS_API_KEY` | `serve.py` | When set, mutating routes require header `X-Aegis-Key`. Custom header also breaks trivial CSRF POSTs. |
 | `AEGIS_APPROVE_KEY` | `core/promote/tokens.py` | HMAC-SHA256 key for G2/G3 tokens. Hex (≥32 chars) or raw (≥16 bytes). Unset = asserted-unverified. Set-but-too-short = `SystemExit`. **Pair with `AEGIS_API_KEY`** — HMAC without API auth leaves `POST /api/approve/mint` reachable (see §7). |
-| `AEGIS_PROMOTE_ALLOW_LIVE=1` | `core/promote/gate.py` G4 | Required in addition to a live connector. `connector=live` is still `DisabledLiveConnector` (raises). |
+| `AEGIS_PROMOTE_ALLOW_LIVE=1` | `core/promote/gate.py` G4 | Required in addition to a live connector. `connector=live` is still `DisabledLiveConnector`. After G4, `push()` raises per device and `promote()` returns HTTP **200** `status: "partial"` — not 500. |
 | `AEGIS_HOST` / `AEGIS_PORT` | `serve.py` | Bind address (default `127.0.0.1:8088`). |
 
 `HttpBackend` itself still uses constructor args (`base_url`, `model_runner_url`), defaulting
@@ -146,7 +146,7 @@ Operator curl path: [§7](#7-hmac-approval--promote-community-8088).
 | POST | `/api/preflight/evidence/oscal` | OSCAL-shaped AR JSON. Same integrity gate. Not FedRAMP. |
 | POST | `/api/preflight/evidence/cab` | CAB one-pager. Rollback is a plan, not a verified execution. |
 | POST | `/api/approve/mint` | HMAC token. Body `{bundle}` → **v2** (config + inventory). Hash-only → **v1**. Tampered bundle → **422**. **503** if HMAC unset. |
-| POST | `/api/preflight/promote` | Gate G1–G5 then dry-run (default). Optional `inventory_sha256` live override. **403** on deny. |
+| POST | `/api/preflight/promote` | Gate G1–G5 then dry-run (default). Optional `inventory_sha256` live override. **403** on deny. Unknown connector → **400**. `connector=live` after G4 → **200** `partial`. |
 | GET | `/api/seal/pubkey` | Offline verify material (public). |
 | POST | `/api/seal/verify` | Body `{bundle, seal}` (public). |
 
@@ -282,9 +282,12 @@ Promotion record (never stores the raw token):
 - **G1 is `bundler.verify`, not `verify_seal`.** A hash-valid unsigned bundle can
   still promote if G2–G5 pass.
 - **Empty `generated_configs`** → `PromoteDenied("nothing to promote")` before the gate.
-- **`connector=live`** is `DisabledLiveConnector`. G4 also needs
-  `AEGIS_PROMOTE_ALLOW_LIVE=1`. Even then `push()` raises `RuntimeError` — the
-  HTTP layer maps that to **500**. Unknown connector names are **400**.
+- **`connector=live`** is `DisabledLiveConnector`. Without
+  `AEGIS_PROMOTE_ALLOW_LIVE=1`, G4 denies (**403**). With the env set,
+  `push()` still raises `RuntimeError`; `promote()` catches it per device
+  and returns HTTP **200** with `status: "partial"` and
+  `pushed[].detail` naming the RuntimeError. It is **not** HTTP 500.
+  Unknown connector names are **400**.
   There is no SSH/NETCONF connector on `main`.
 - **v2 vs config edit.** Changing grounded config after mint invalidates `c`.
   Changing `twin.inventory_rev` (or the live override) invalidates `inv`.

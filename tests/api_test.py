@@ -20,6 +20,7 @@ API client depend on:
   17  API key required when set        -> 401 without header, 200 with X-Aegis-Key
   18  HMAC mint                        -> 503 unset; 200 v1 when keyed; 200 v2 when bundle given
   19  Promote                          -> 403 on random token under HMAC; 200 bound; v2 drift 403
+  21  Live connector                   -> unknown name 400; no opt-in 403; after G4 200 partial (not 500)
 
 Usage:  python3 -m aegis.tests.api_test
 """
@@ -165,6 +166,46 @@ def main() -> int:
                   str(rec.get("approval")))
             check("promote.asserted.hash", len(rec.get("integrity", {}).get("sha256") or "") == 64,
                   str(rec.get("integrity")))
+
+    # 21 — connector names and live-push HTTP contract (HMAC unset)
+    if bundle:
+        decision = (bundle.get("verdict") or {}).get("decision")
+        r = c.post("/api/preflight/promote",
+                   json={"bundle": bundle, "approver": "noc-lead",
+                         "approval_token": "tok-123", "connector": "ssh"})
+        check("promote.unknown.400", r.status_code == 400, str(r.status_code))
+        check("promote.unknown.msg", "unknown connector" in r.get_data(as_text=True),
+              r.get_data(as_text=True)[:160])
+        r = c.post("/api/preflight/promote",
+                   json={"bundle": bundle, "approver": "noc-lead",
+                         "approval_token": "tok-123", "connector": "live"})
+        check("promote.live.no_optin.403", r.status_code == 403, str(r.status_code))
+        if decision != "blocked":
+            check("promote.live.no_optin.msg",
+                  "live connector blocked" in r.get_data(as_text=True),
+                  r.get_data(as_text=True)[:160])
+        os.environ["AEGIS_PROMOTE_ALLOW_LIVE"] = "1"
+        try:
+            r = c.post("/api/preflight/promote",
+                       json={"bundle": bundle, "approver": "noc-lead",
+                             "approval_token": "tok-123", "connector": "live"})
+            if decision == "blocked":
+                check("promote.live.optin.blocked.403", r.status_code == 403,
+                      f"{r.status_code} {r.get_data(as_text=True)[:160]}")
+            else:
+                rec = r.get_json() if r.status_code == 200 else {}
+                check("promote.live.optin.200", r.status_code == 200,
+                      f"{r.status_code} {r.get_data(as_text=True)[:160]}")
+                check("promote.live.optin.partial", rec.get("status") == "partial",
+                      str(rec.get("status")))
+                pushed = rec.get("pushed") or []
+                details = " ".join(str(p.get("detail") or "") for p in pushed)
+                check("promote.live.optin.not_implemented",
+                      "not implemented" in details.lower()
+                      and pushed and not any(p.get("pushed") for p in pushed),
+                      details[:160])
+        finally:
+            os.environ.pop("AEGIS_PROMOTE_ALLOW_LIVE", None)
 
     # 19 — API key: mutating routes 401 without it; pubkey stays public
     os.environ["AEGIS_API_KEY"] = "ci-test-key"

@@ -338,7 +338,8 @@ are therefore never promotable under a valid ceiling.
 Empty `change.generated_configs` is denied in `promote()` (`nothing to promote`) before
 `evaluate()` runs. The default connector is `DryRunConnector` (`live=False`).
 `connector=live` is `DisabledLiveConnector` — even with `AEGIS_PROMOTE_ALLOW_LIVE=1`
-it refuses to push. There is no SSH/NETCONF connector on `main`.
+it refuses to push (`promote()` returns HTTP 200 `status: "partial"`; G4
+without the env is HTTP 403). There is no SSH/NETCONF connector on `main`.
 
 ---
 

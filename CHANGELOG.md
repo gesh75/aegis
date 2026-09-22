@@ -72,7 +72,9 @@ operators can see fail-closed behavior that is already in the code.
   `GET /api/status` field contract detects the hole
   (`api_auth=open` + `approve_hmac=required`). Includes a local
   `config_digest` / `inventory_digest` recompute for v2 deny debug.
-  `connector=live` is HTTP **500**; unknown names are **400**.
+  `connector=live` without `AEGIS_PROMOTE_ALLOW_LIVE=1` is **403** (G4);
+  after G4 the record is HTTP **200** `status: "partial"` (`push()` raises
+  per device). Unknown names are **400**.
   README command block now lists all nine CI suites (`twin_test`, `api_test`
   were in the table but missing from the copy-paste).
 - **OSCAL / CAB field contract** (`docs/EVIDENCE.md` §§4–5, `ARCHITECTURE.md` §11):
