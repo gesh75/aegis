@@ -5,8 +5,8 @@ must not treat them as the same control.
 
 | Layer | What it proves | Who can mint it | Where it is checked |
 |---|---|---|---|
-| **Bundle integrity** (`integrity.sha256`) | The JSON is self-consistent: fields still hash to the recorded digest. | Anyone who can compute the public algorithm. | `evidence.bundler.verify` · PDF endpoint · promote G1 · seal G6 |
-| **Detached seal** (`bundle.seal`) | A pinned key signed *this* digest plus model identity plus the autonomy ceiling. | Only a process that holds `AEGIS_SEAL_KEY` (or the ephemeral demo key). | `POST /api/seal/verify` · `core.seal.verify_seal` (G0–G6) |
+| **Bundle integrity** (`integrity.sha256`) | The JSON is self-consistent: fields still hash to the recorded digest. | Anyone who can compute the public algorithm. | `evidence.bundler.verify` · PDF/OSCAL/CAB endpoints · promote G1 · seal G6 |
+| **Detached seal** (`bundle.seal`) | A pinned key signed *this* digest plus model identity plus the autonomy ceiling. | Only a process that holds `AEGIS_SEAL_KEY` (or the ephemeral demo key). | `POST /api/seal/verify` · `core.seal.verify_seal` (G0–G6) · **promote G0** · **PDF/OSCAL/CAB exports** · `python -m aegis.verify` |
 
 The examiner PDF is a **rendering** of a self-consistent bundle. It is not an
 origin proof.
@@ -77,17 +77,18 @@ POST /api/preflight/evidence/pdf
 |---|---|
 | No `integrity.sha256` | **400** `valid evidence bundle required` |
 | `bundler.verify` is false | **422** content ≠ recorded digest |
-| `verify_seal` | **not called** |
+| `seal` present but `verify_seal` fails | **422** `seal verification failed at G<n>` (since 2026-10) |
+| `seal` absent | community: renders, **Authenticity: UNSEALED** printed under the verdict · production: **422** unless the verdict is `blocked` |
 | Render succeeds | **200** `application/pdf`, filename `aegis-evidence-<12 hex of run_id>.pdf` |
 
-`render_pdf` will print a "Bounded-autonomy seal" block whenever `bundle.seal`
-is a dict. It copies `claims` and `signature.alg` / `key_id` into the page. It
-does not verify the signature. A real pipeline bundle with the `seal` object
-replaced still renders, including attacker-chosen `provider` / `model` text.
+Since 2026-10 the endpoint verifies the seal against the server's pinned key
+*before* rendering. A swapped or garbage `seal` is a 422, never a printed
+"receipt". Every PDF carries an **Authenticity** line. Config secrets are redacted
+and all bundle text is markup-escaped.
 
-`docs/IMPROVEMENT_PLAN_2026-06.md` Tier-0 item 2 asked this endpoint to call
-`verify_seal()` (or watermark UNVERIFIED). That has not shipped. Until it does,
-do not hand a downloaded PDF to an examiner as proof of origin.
+The PDF is still a *rendering*. The examiner's proof of origin is the
+`{bundle, seal}` pair verified offline against the pinned public key
+(`python -m aegis.verify --bundle run.json --pubkey pubkey.json`, §6).
 
 ---
 
@@ -183,18 +184,19 @@ root of trust.
   `compute_sha256(bundle)`, POST it to the PDF route → **200**. That is the
   public algorithm working as designed. It is not a forgery of the Ed25519
   receipt.
-- **Swapped `seal`.** Because `seal` is excluded from the digest, replacing it
-  does not trip the PDF 422. It *does* trip `verify_seal` (G1/G2/G3/G4/G5
-  depending on what changed).
+- **Swapped `seal`.** `seal` is excluded from the digest, so replacing it does not
+  trip the integrity check. Since 2026-10 the export and promote routes run
+  `verify_seal`, so it trips there (G1/G2/G3/G4/G5, depending on what changed) → 422/403.
 - **`seal: null`.** Unbounded changes (AS / RD / RT → BLOCK; ceiling exceeded)
   produce no receipt. A PDF of that bundle cannot claim "within bound."
 - **Ephemeral demo key.** Receipts do not survive a restart unless
   `AEGIS_SEAL_KEY` is pinned. `GET /api/seal/pubkey` after restart is the
   check.
-- **Promotion G1 ≠ seal G1.** Promote `evaluate()` re-checks `bundler.verify`
-  (content hash) and, in G5, re-derives the autonomy ceiling. It does not call
-  `verify_seal`. A hash-valid unsigned bundle can still be a promotion
-  candidate if the other gate rules pass.
+- **Promotion G0 = seal verification.** Since 2026-10 the server's promote route
+  calls `evaluate(..., require_seal=True)`. G0 runs `verify_seal` against the
+  pinned key, so a hash-valid but unsigned (or forged) bundle is denied before
+  G1–G5. Library callers of `gate.evaluate` get the same behavior by passing
+  `seal=` and `verifier=`.
 - **Community `mode=live`.** `POST /api/preflight/run` with `mode=live` is
   **501**. The live twin path is the integrated `:5757` product
   ([GO_LIVE.md](GO_LIVE.md)).
