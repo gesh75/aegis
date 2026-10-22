@@ -101,6 +101,9 @@ findings. Full analysis, competitor matrix and roadmap: `docs/STRATEGY_2026-10.m
   `router bgp N`, `local-as`, `autonomous-system`, RD and RT stay BLOCK. Previously no BGP
   neighbor add could ever be sealed or promoted.
 - `HttpBackend` rejects non-http(s) URLs (Bandit B310).
+- **Off-box ledger anchor.** `AEGIS_LEDGER_SYSLOG=host:port[/tcp|/udp]` sends every
+  hash-chained entry to the SIEM as RFC 5424, using the stdlib only. It is best-effort: a SIEM
+  outage never blocks a change. Failures are exposed as `aegis_ledger_anchor_failures_total`.
 - **CSP drops `script-src 'unsafe-inline'` (A10).** The UI script moved to `/preflight.js`
   and handlers are wired with `addEventListener` and event delegation. This was verified in
   headless Chromium under the real header: zero CSP violations, and run, PDF download and

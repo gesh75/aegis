@@ -15,6 +15,8 @@
   H9  /metrics + /healthz + /api/ledger/verify contract
   H11 AEGIS_PEER_AS_POLICY: default keeps peer AS as BLOCK; ``hitl`` makes a neighbor add
       HITL (sealable, needs approval) while router bgp / local-as stay BLOCK
+  H12 ledger SIEM anchor: entries arrive over UDP syslog with the chain hashes; a dead
+      sink never blocks the append and is counted
   H10 offline CLI (python -m aegis.verify): genuine seal PASS (exit 0), forged FAIL
       (exit 1), missing seal with --pubkey FAIL, tampered ledger FAIL
 
@@ -388,7 +390,39 @@ def peer_as_policy() -> None:
         os.environ.pop("AEGIS_PEER_AS_POLICY", None)
 
 
+def siem_anchor() -> None:
+    import socket
+    from ..evidence.ledger import SyslogSink
+    rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    rx.bind(("127.0.0.1", 0))
+    rx.settimeout(2)
+    port = rx.getsockname()[1]
+    led = Ledger(None, sink=SyslogSink(f"127.0.0.1:{port}/udp"))
+    e = led.append("preflight_run", run_id="siem-1")
+    try:
+        msg = rx.recv(65535).decode()
+        check("H12.syslog_received", msg.startswith("<110>1 ") and e["entry_sha256"] in msg
+              and e["prev_sha256"] in msg, msg[:120])
+    except socket.timeout:
+        check("H12.syslog_received", False, "no datagram")
+    finally:
+        rx.close()
+
+    def dead(_entry):
+        raise OSError("siem down")
+    led2 = Ledger(None, sink=dead)
+    led2.append("preflight_run", run_id="x")
+    check("H12.dead_sink_nonblocking", led2.head()["seq"] == 1
+          and led2.head()["anchor_failures"] == 1, str(led2.head()))
+    try:
+        SyslogSink("no-port")
+        check("H12.bad_spec_fatal", False, "accepted bad spec")
+    except SystemExit:
+        check("H12.bad_spec_fatal", True)
+
+
 def main() -> int:
+    siem_anchor()
     peer_as_policy()
     offline_cli()
     gate_and_ledger()

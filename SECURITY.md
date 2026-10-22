@@ -16,7 +16,7 @@ within 3 business days.
 | Bundle came from **this** AEGIS and was bounded | detached Ed25519 seal, `verify_seal` G0–G6, offline `python -m aegis.verify` | Hardware-backed key (PIV signer is planned, `docs/PIV_HARDWARE_SIGNER_PLAN.md`) |
 | A second person approved | HMAC v2 token + `AEGIS_APPROVER_KEYS` identity + SoD (approver ≠ operator) | SSO/MFA identity (planned: Entra ID / OIDC) |
 | Approval used once | single-use token claim in the hash-chained ledger | — |
-| Audit trail is tamper-evident | `evidence/ledger.py` hash chain, `/api/ledger/verify` | Tamper-proof — ship entries to WORM/SIEM to anchor |
+| Audit trail is tamper-evident | `evidence/ledger.py` hash chain, `/api/ledger/verify`, off-box anchor via `AEGIS_LEDGER_SYSLOG` (RFC 5424 to your SIEM) | Tamper-proof on the AEGIS host — the SIEM/WORM copy is the anchor |
 | Rollback | a vendor-aware *plan* (`verification: plan-only`) | That the reversal was executed in the twin |
 | Compliance rows | deterministic config checks + process mapping for THIS change | Certification of the organization |
 
@@ -33,6 +33,8 @@ and it enforces the stricter request-time rules listed below.
 | `AEGIS_LEDGER_PATH` | append-only audit ledger on a persistent volume | e.g. `/var/lib/aegis/ledger.jsonl` |
 | `AEGIS_APPROVER_KEYS` | `name:sha256(credential)` per approver | `python -m aegis.core.promote.approvers alice@corp` |
 | `AEGIS_CHANGE_REF_PATTERN` *(optional)* | pin your ITSM numbering | e.g. `^CHG[0-9]{7}$` |
+| `AEGIS_LEDGER_SYSLOG` *(recommended)* | send every ledger entry to the SIEM (`host:port[/tcp\|/udp]`) | e.g. `127.0.0.1:514/tcp` to a local rsyslog relay that forwards over TLS. The sink itself sends plain TCP/UDP, not RFC 5425 TLS. |
+| `AEGIS_PEER_AS_POLICY` *(optional)* | `block` (default) or `hitl` for BGP neighbor adds | decision D1 in the strategy doc |
 
 Production request-time rules:
 

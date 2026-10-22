@@ -6,8 +6,11 @@ or editing any line breaks the chain from that point on — `verify_chain` repor
 first bad sequence number.
 
 This is tamper-EVIDENT, not tamper-PROOF: an attacker with write access to the file can
-rewrite the whole tail and recompute hashes. Ship the file (or each entry's sha256) to a
-WORM store / SIEM to anchor it — see docs/STRATEGY_2026-10.md.
+rewrite the whole tail and recompute hashes. Anchor it off-box: set
+``AEGIS_LEDGER_SYSLOG=host:port[/tcp|/udp]`` and every entry (with its entry_sha256 and
+prev_sha256) is also sent to your SIEM as an RFC 5424 message, so a local rewrite no longer
+matches the SIEM copy. The sink is best-effort (a SIEM outage never blocks a change);
+failures are counted in ``Ledger.sink_failures`` and surfaced on /metrics.
 
 Storage:
   * ``AEGIS_LEDGER_PATH`` set   -> JSONL file, fcntl-locked appends, survives restarts
@@ -22,6 +25,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import socket
 import threading
 from datetime import datetime, timezone
 
@@ -49,9 +53,44 @@ class LedgerError(Exception):
     """The ledger file is unreadable or its chain is broken (fail closed)."""
 
 
+class SyslogSink:
+    """RFC 5424 sender (stdlib only). One JSON ledger entry per message."""
+
+    def __init__(self, spec: str) -> None:
+        target, _, proto = spec.partition("/")
+        host, _, port = target.rpartition(":")
+        if not host or not port.isdigit():
+            raise SystemExit(f"[aegis.ledger] AEGIS_LEDGER_SYSLOG must be host:port[/tcp|/udp] "
+                             f"(got {spec!r})")
+        self.host, self.port = host.strip("[]"), int(port)
+        self.proto = (proto or "udp").lower()
+        if self.proto not in ("udp", "tcp"):
+            raise SystemExit("[aegis.ledger] AEGIS_LEDGER_SYSLOG protocol must be tcp or udp")
+
+    def __call__(self, entry: dict) -> None:
+        msg = json.dumps(entry, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        # <110> = facility 13 (log audit) * 8 + severity 6 (info)
+        line = (f"<110>1 {entry.get('ts_utc', '-')} {socket.gethostname()} aegis - "
+                f"{entry.get('kind', '-')} - {msg}")
+        data = line.encode("ascii", "replace")
+        if self.proto == "udp":
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.sendto(data[:65000], (self.host, self.port))
+        else:  # RFC 6587 octet counting
+            with socket.create_connection((self.host, self.port), timeout=2) as s:
+                s.sendall(f"{len(data)} ".encode() + data)
+
+
+def sink_from_env():
+    spec = (os.environ.get("AEGIS_LEDGER_SYSLOG") or "").strip()
+    return SyslogSink(spec) if spec else None
+
+
 class Ledger:
-    def __init__(self, path: str | None = None) -> None:
+    def __init__(self, path: str | None = None, sink=None) -> None:
         self.path = path or None
+        self.sink = sink
+        self.sink_failures = 0
         self._lock = threading.Lock()
         self._entries: list[dict] = []      # memory mode only
         self._used: set[str] = set()
@@ -97,6 +136,11 @@ class Ledger:
         else:
             self._entries.append(entry)
         self._head, self._seq = entry["entry_sha256"], entry["seq"]
+        if self.sink is not None:
+            try:
+                self.sink(entry)
+            except Exception:  # noqa: BLE001 — SIEM outage must not block the change path
+                self.sink_failures += 1
         return entry
 
     def claim_token(self, token_sha256: str, **context) -> bool:
@@ -120,7 +164,9 @@ class Ledger:
 
     def head(self) -> dict:
         return {"seq": self._seq, "head_sha256": self._head,
-                "storage": "file" if self.path else "memory"}
+                "storage": "file" if self.path else "memory",
+                "anchor": "syslog" if self.sink is not None else "none",
+                "anchor_failures": self.sink_failures}
 
     def verify(self) -> tuple[bool, int, str]:
         if self.path:

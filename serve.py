@@ -36,7 +36,7 @@ from aegis.core.promote.tokens import (
 )
 from aegis.core.promote import approvers
 from aegis.core import runtime
-from aegis.evidence.ledger import Ledger
+from aegis.evidence.ledger import Ledger, sink_from_env
 
 _UI = os.path.join(os.path.dirname(__file__), "ui", "preflight_screen.html")
 _UI_JS = os.path.join(os.path.dirname(__file__), "ui", "preflight.js")
@@ -111,7 +111,7 @@ _SIGNER = _load_signer()
 _VERIFIER: Ed25519Verifier = _SIGNER.verifier()
 load_approve_key()  # SystemExit if AEGIS_APPROVE_KEY is set but unusable
 approvers.load_registry()  # SystemExit if AEGIS_APPROVER_KEYS is malformed
-_LEDGER = Ledger(os.environ.get("AEGIS_LEDGER_PATH") or None)
+_LEDGER = Ledger(os.environ.get("AEGIS_LEDGER_PATH") or None, sink=sink_from_env())
 
 # Prometheus counters (text exposition, no client library — air-gap friendly).
 _METRICS: dict[tuple[str, tuple], int] = {}
@@ -226,6 +226,9 @@ def metrics():
         "# HELP aegis_ledger_entries Entries in the hash-chained audit ledger.",
         "# TYPE aegis_ledger_entries gauge",
         f"aegis_ledger_entries {_LEDGER.head()['seq']}",
+        "# HELP aegis_ledger_anchor_failures_total Ledger entries the SIEM sink failed to send.",
+        "# TYPE aegis_ledger_anchor_failures_total counter",
+        f"aegis_ledger_anchor_failures_total {_LEDGER.head()['anchor_failures']}",
     ]
     with _METRICS_LOCK:
         snap = dict(_METRICS)
