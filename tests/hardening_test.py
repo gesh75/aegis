@@ -13,6 +13,8 @@
   H7  approver registry: mint needs the approver's own credential; identity comes from it
   H8  evidence honesty: rollback is plan-only; secrets redacted; PDF markup is escaped
   H9  /metrics + /healthz + /api/ledger/verify contract
+  H11 AEGIS_PEER_AS_POLICY: default keeps peer AS as BLOCK; ``hitl`` makes a neighbor add
+      HITL (sealable, needs approval) while router bgp / local-as stay BLOCK
   H10 offline CLI (python -m aegis.verify): genuine seal PASS (exit 0), forged FAIL
       (exit 1), missing seal with --pubkey FAIL, tampered ledger FAIL
 
@@ -346,7 +348,39 @@ def offline_cli() -> None:
         check("H10.usage_exit2", cli.main([]) == 2)
 
 
+def peer_as_policy() -> None:
+    from ..core.risk import classify_change, required_authority, Severity, Tier
+    nbr = [{"device": "leaf-1", "vendor": "frr", "config": " neighbor 10.0.0.9 remote-as 65020",
+            "grounded_commands": []}]
+    own = [{"device": "leaf-1", "vendor": "frr", "config": "router bgp 65010",
+            "grounded_commands": []}]
+    os.environ.pop("AEGIS_PEER_AS_POLICY", None)
+    check("H11.default_block",
+          required_authority(Severity.LOW, classify_change(nbr)) == Tier.BLOCK)
+    os.environ["AEGIS_PEER_AS_POLICY"] = "hitl"
+    try:
+        check("H11.hitl_neighbor",
+              required_authority(Severity.LOW, classify_change(nbr)) == Tier.HITL)
+        check("H11.hitl_never_auto",
+              required_authority(Severity.NONE, classify_change(nbr)) >= Tier.HITL)
+        check("H11.local_asn_still_block",
+              required_authority(Severity.LOW, classify_change(own)) == Tier.BLOCK)
+        b = run_preflight("", backend=SimulatorBackend(), lab="single", source="config_import",
+                          imported_configs=nbr, operator="alice")
+        check("H11.recorded", b["change"]["authority"]["change_class"].get("touches_peer_as") is True,
+              str(b["change"]["authority"]["change_class"]))
+        os.environ["AEGIS_PEER_AS_POLICY"] = "allow"
+        try:
+            classify_change(nbr)
+            check("H11.bad_policy_fatal", False, "accepted 'allow'")
+        except ValueError:
+            check("H11.bad_policy_fatal", True)
+    finally:
+        os.environ.pop("AEGIS_PEER_AS_POLICY", None)
+
+
 def main() -> int:
+    peer_as_policy()
     offline_cli()
     gate_and_ledger()
     production_startup()

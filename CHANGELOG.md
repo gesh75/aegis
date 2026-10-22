@@ -96,6 +96,12 @@ findings. Full analysis, competitor matrix and roadmap: `docs/STRATEGY_2026-10.m
   **The hard-coded `approver: "noc-lead"` was removed**, so the demo no longer self-approves
   high-risk changes.
 
+- `AEGIS_PEER_AS_POLICY=hitl` (opt-in; the default `block` is unchanged): a `remote-as` or
+  `peer-as` change, meaning a BGP neighbor add, becomes a peering change at HITL minimum.
+  `router bgp N`, `local-as`, `autonomous-system`, RD and RT stay BLOCK. Previously no BGP
+  neighbor add could ever be sealed or promoted.
+- `HttpBackend` rejects non-http(s) URLs (Bandit B310).
+
 #### Performance
 - `ComplianceSignal.text()` and the secret scan are memoized. With 11 frameworks the sim
   pipeline goes from 0.80 to 0.43 ms per run (about 1.9×).

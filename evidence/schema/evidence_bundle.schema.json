@@ -86,7 +86,8 @@
                 "touches_asn":      { "type": "boolean" },
                 "touches_rd_rt":    { "type": "boolean" },
                 "touches_spine":    { "type": "boolean" },
-                "touches_underlay": { "type": "boolean" }
+                "touches_underlay": { "type": "boolean" },
+                "touches_peer_as":  { "type": "boolean", "description": "Present only under AEGIS_PEER_AS_POLICY=hitl: a remote-as/peer-as change, HITL minimum (not fabric identity)." }
               }
             }
           }
