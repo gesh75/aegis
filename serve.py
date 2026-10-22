@@ -16,6 +16,7 @@ import base64
 import hmac as hmaclib
 import os
 import re
+import threading
 from datetime import datetime, timezone
 
 from flask import Flask, Response, jsonify, request
@@ -33,6 +34,9 @@ from aegis.core.promote.tokens import (
     TokenError, hmac_configured, mint_token, mint_token_for_bundle,
     digests_from_bundle, load_approve_key,
 )
+from aegis.core.promote import approvers
+from aegis.core import runtime
+from aegis.evidence.ledger import Ledger
 
 _UI = os.path.join(os.path.dirname(__file__), "ui", "preflight_screen.html")
 
@@ -100,9 +104,58 @@ def _load_signer() -> Ed25519Signer:
     return Ed25519Signer.generate()
 
 
+runtime.assert_startup_ok()  # production refuses to start with any control unset
 _SIGNER = _load_signer()
 _VERIFIER: Ed25519Verifier = _SIGNER.verifier()
 load_approve_key()  # SystemExit if AEGIS_APPROVE_KEY is set but unusable
+approvers.load_registry()  # SystemExit if AEGIS_APPROVER_KEYS is malformed
+_LEDGER = Ledger(os.environ.get("AEGIS_LEDGER_PATH") or None)
+
+# Prometheus counters (text exposition, no client library — air-gap friendly).
+_METRICS: dict[tuple[str, tuple], int] = {}
+_METRICS_LOCK = threading.Lock()
+
+
+def _inc(name: str, **labels) -> None:
+    key = (name, tuple(sorted(labels.items())))
+    with _METRICS_LOCK:
+        _METRICS[key] = _METRICS.get(key, 0) + 1
+
+
+def _client_error(exc: Exception) -> str:
+    """Community shows the exception for debuggability; production never leaks internals."""
+    if runtime.is_production():
+        app.logger.exception("pipeline error")
+        return "internal error (see server log)"
+    return f"{type(exc).__name__}: {exc}"
+
+
+def _authenticity(bundle: dict) -> tuple[bool, str]:
+    """Seal verdict for an export. (ok, human-readable authenticity line).
+
+    present + valid   -> ok, "seal verified ..."
+    present + invalid -> NOT ok (forged/tampered seal never renders)
+    absent            -> community: ok but labelled UNSEALED; production: ok only for a
+                         ``blocked`` verdict (blocked changes are never sealed by design,
+                         and their evidence must stay exportable)
+    """
+    seal = bundle.get("seal")
+    if isinstance(seal, dict):
+        v = verify_seal(bundle, seal, _VERIFIER)
+        _inc("aegis_seal_verify_total", result="valid" if v.valid else "invalid")
+        if not v.valid:
+            return False, f"seal verification failed at {v.gate}: {v.reason}"
+        return True, (f"seal verified against pinned key {_VERIFIER.alg()}:"
+                      f"{_VERIFIER.key_id()} (model identity + bounded authority + bundle "
+                      f"sha256)")
+    if seal is not None:
+        return False, "seal is not an object"
+    decision = (bundle.get("verdict") or {}).get("decision")
+    if runtime.is_production() and decision != "blocked":
+        return False, "unsealed bundle — production exports require a valid seal"
+    return True, ("UNSEALED — integrity self-consistency only; origin NOT authenticated"
+                  + (" (blocked change: seal withheld by design)" if decision == "blocked"
+                     else ""))
 
 
 @app.after_request
@@ -137,11 +190,56 @@ def ui():
 def status():
     """Public, no secrets: whether this process requires API auth / HMAC approvals."""
     return jsonify({
+        "mode": runtime.mode(),
         "api_auth": "required" if _api_key() else "open",
         "approve_hmac": "required" if hmac_configured() else "asserted-unverified",
+        "approver_identity": "registry" if approvers.registry_configured() else "asserted",
         "seal": "pinned" if (os.environ.get("AEGIS_SEAL_KEY") or "").strip() else "ephemeral",
+        "ledger": _LEDGER.head()["storage"],
         "egress": "none",
     })
+
+
+@app.get("/healthz")
+def healthz():
+    """Liveness for container healthchecks. Public, constant body."""
+    return jsonify({"ok": True})
+
+
+@app.get("/metrics")
+def metrics():
+    """Prometheus text exposition. Counters only — no bundle content, no identities."""
+    lines = [
+        "# HELP aegis_info Static deployment facts (value is always 1).",
+        "# TYPE aegis_info gauge",
+        f'aegis_info{{mode="{runtime.mode()}",api_auth="{"required" if _api_key() else "open"}",'
+        f'approve_hmac="{"required" if hmac_configured() else "asserted"}",'
+        f'ledger="{_LEDGER.head()["storage"]}"}} 1',
+        "# HELP aegis_ledger_entries Entries in the hash-chained audit ledger.",
+        "# TYPE aegis_ledger_entries gauge",
+        f"aegis_ledger_entries {_LEDGER.head()['seq']}",
+    ]
+    with _METRICS_LOCK:
+        snap = dict(_METRICS)
+    seen: set[str] = set()
+    for (name, labels), val in sorted(snap.items()):
+        if name not in seen:
+            lines.append(f"# TYPE {name} counter")
+            seen.add(name)
+        lab = ",".join(f'{k}="{v}"' for k, v in labels)
+        lines.append(f"{name}{{{lab}}} {val}" if lab else f"{name} {val}")
+    return Response("\n".join(lines) + "\n", mimetype="text/plain; version=0.0.4")
+
+
+@app.get("/api/ledger/verify")
+def ledger_verify():
+    """Re-walk the hash chain. Guarded: the head hash is an audit anchor."""
+    denied = _guard_api()
+    if denied:
+        return denied
+    ok, n, reason = _LEDGER.verify()
+    return jsonify({"valid": ok, "entries_checked": n, "reason": reason,
+                    **_LEDGER.head()}), (200 if ok else 409)
 
 
 @app.post("/api/preflight/run")
@@ -153,6 +251,19 @@ def preflight_run():
     if (data.get("mode") or "sim") == "live":
         return jsonify({"error": "live mode is not available in the community tier",
                         "stage": "guard", "mode": "live"}), 501
+
+    change_ref = (str(data.get("change_ref") or "")).strip() or None
+    if change_ref and not runtime.valid_change_ref(change_ref):
+        return jsonify({"error": "change_ref does not match AEGIS_CHANGE_REF_PATTERN "
+                                 "(e.g. CHG0012345)", "stage": "guard"}), 400
+    if runtime.is_production():
+        if not change_ref:
+            return jsonify({"error": "production mode requires change_ref (ITSM change "
+                                     "number) on every preflight run", "stage": "guard"}), 400
+        if data.get("approver"):
+            return jsonify({"error": "production mode: approval is granted at promotion "
+                                     "with an HMAC token, not asserted at preflight",
+                            "stage": "guard"}), 400
 
     source = (data.get("source") or "nl_intent").strip()
     imported = None
@@ -173,81 +284,92 @@ def preflight_run():
             frameworks=data.get("frameworks") or ["pci_dss_v4"],
             operator=(data.get("operator") or "community").strip(),
             approver=data.get("approver") or None,
-            source=source, imported_configs=imported)
+            source=source, imported_configs=imported, change_ref=change_ref)
     except PreflightError as e:
+        _inc("aegis_preflight_runs_total", decision="guard_rejected")
         return jsonify({"error": str(e), "stage": "guard"}), 400
     except Exception as e:  # noqa: BLE001
-        return jsonify({"error": f"{type(e).__name__}: {e}", "stage": "pipeline"}), 502
+        _inc("aegis_preflight_runs_total", decision="pipeline_error")
+        return jsonify({"error": _client_error(e), "stage": "pipeline"}), 502
     # CROSS-3: emit the bounded-autonomy seal in the same response (None if the change is
     # not within the autonomy ceiling -- see change.authority for why). Detached: the seal
     # rides under bundle["seal"] but is excluded from the bundle's own integrity hash.
     seal, _skipped = seal_response(bundle, _SIGNER, datetime.now(timezone.utc).isoformat())
     bundle["seal"] = seal
+    decision = bundle["verdict"]["decision"]
+    _inc("aegis_preflight_runs_total", decision=decision)
+    _LEDGER.append("preflight_run", run_id=bundle["run_id"],
+                   bundle_sha256=bundle["integrity"]["sha256"], decision=decision,
+                   risk_tier=bundle["change"]["risk_tier"],
+                   authority=bundle["change"]["authority"]["effective"],
+                   operator=bundle.get("operator"), change_ref=change_ref,
+                   sealed=isinstance(seal, dict))
     return jsonify(bundle)
+
+
+def _verified_bundle():
+    """Shared gate for PDF / OSCAL / CAB: API key + sha present + bundler.verify + seal.
+
+    Returns (error_response, bundle, authenticity_line). A present-but-invalid seal is a
+    422 — a forged seal must never be rendered as an "offline-verifiable receipt"."""
+    denied = _guard_api()
+    if denied:
+        return denied, None, None
+    bundle = request.get_json(silent=True) or {}
+    if not isinstance(bundle, dict) or not (bundle.get("integrity") or {}).get("sha256"):
+        return (jsonify({"error": "valid evidence bundle required"}), 400), None, None
+    if not bundler_verify(bundle):
+        return (jsonify({"error": "bundle integrity verification failed "
+                                 "(content does not match integrity.sha256)"}), 422), None, None
+    ok, authenticity = _authenticity(bundle)
+    if not ok:
+        return (jsonify({"error": authenticity}), 422), None, None
+    return None, bundle, authenticity
+
+
+def _run_slug(bundle: dict) -> str:
+    # run_id is client-supplied; legit ids are uuid4().hex, so [a-f0-9] is lossless and
+    # blocks quote/breakout header injection in Content-Disposition.
+    return re.sub(r"[^a-f0-9]", "", str(bundle.get("run_id", "bundle")))[:12] or "bundle"
 
 
 @app.post("/api/preflight/evidence/pdf")
 def evidence_pdf():
-    denied = _guard_api()
-    if denied:
-        return denied
-    bundle = request.get_json(silent=True) or {}
-    if not bundle.get("integrity", {}).get("sha256"):
-        return jsonify({"error": "valid evidence bundle required"}), 400
-    # never render a tampered/forged bundle into an examiner-ready artifact:
-    # the integrity hash must verify before ReportLab ever sees the content
-    if not bundler_verify(bundle):
-        return jsonify({"error": "bundle integrity verification failed "
-                                 "(content does not match integrity.sha256)"}), 422
+    err, bundle, authenticity = _verified_bundle()
+    if err:
+        return err
     try:
-        pdf = render_pdf(bundle)
+        pdf = render_pdf(bundle, authenticity=authenticity)
     except Exception as e:  # noqa: BLE001
-        return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
-    # run_id is client-supplied; sanitize before it lands in the Content-Disposition
-    # header. Legit run_ids are uuid4().hex (lowercase hex), so stripping to [a-f0-9]
-    # is lossless for them while blocking quote/breakout header-injection abuse.
-    run = re.sub(r"[^a-f0-9]", "", str(bundle.get("run_id", "bundle")))[:12] or "bundle"
+        return jsonify({"error": _client_error(e)}), 500
+    _inc("aegis_evidence_exports_total", format="pdf")
     return Response(pdf, mimetype="application/pdf", headers={
-        "Content-Disposition": f'attachment; filename="aegis-evidence-{run}.pdf"'})
-
-
-def _verified_bundle():
-    """Shared gate for PDF / OSCAL / CAB: API key + sha present + bundler.verify."""
-    denied = _guard_api()
-    if denied:
-        return denied, None
-    bundle = request.get_json(silent=True) or {}
-    if not bundle.get("integrity", {}).get("sha256"):
-        return (jsonify({"error": "valid evidence bundle required"}), 400), None
-    if not bundler_verify(bundle):
-        return (jsonify({"error": "bundle integrity verification failed "
-                                 "(content does not match integrity.sha256)"}), 422), None
-    return None, bundle
+        "Content-Disposition": f'attachment; filename="aegis-evidence-{_run_slug(bundle)}.pdf"'})
 
 
 @app.post("/api/preflight/evidence/oscal")
 def evidence_oscal():
     """OSCAL-shaped Assessment Results. Not a FedRAMP package. Integrity must verify."""
-    err, bundle = _verified_bundle()
+    err, bundle, authenticity = _verified_bundle()
     if err:
         return err
-    body = to_oscal(bundle)
-    run = re.sub(r"[^a-f0-9]", "", str(bundle.get("run_id", "bundle")))[:12] or "bundle"
+    body = to_oscal(bundle, authenticity=authenticity)
+    _inc("aegis_evidence_exports_total", format="oscal")
     return jsonify(body), 200, {
-        "Content-Disposition": f'attachment; filename="aegis-oscal-{run}.json"',
+        "Content-Disposition": f'attachment; filename="aegis-oscal-{_run_slug(bundle)}.json"',
     }
 
 
 @app.post("/api/preflight/evidence/cab")
 def evidence_cab():
     """One-page CAB packet. Rollback is a plan, not a verified execution."""
-    err, bundle = _verified_bundle()
+    err, bundle, authenticity = _verified_bundle()
     if err:
         return err
-    body = to_cab(bundle)
-    run = re.sub(r"[^a-f0-9]", "", str(bundle.get("run_id", "bundle")))[:12] or "bundle"
+    body = to_cab(bundle, authenticity=authenticity)
+    _inc("aegis_evidence_exports_total", format="cab")
     return jsonify(body), 200, {
-        "Content-Disposition": f'attachment; filename="aegis-cab-{run}.json"',
+        "Content-Disposition": f'attachment; filename="aegis-cab-{_run_slug(bundle)}.json"',
     }
 
 
@@ -262,15 +384,41 @@ def approve_mint():
                                  "(asserted-unverified mode)"}), 503
     data = request.get_json(silent=True) or {}
     bundle = data.get("bundle")
+    who = data.get("approver") if isinstance(data.get("approver"), str) else ""
+    if approvers.registry_configured():
+        # A2: the approver identity comes from the approver's OWN credential, never from
+        # the request body and never from the shared operator API key.
+        resolved = approvers.resolve(request.headers.get("X-Aegis-Approver-Key"))
+        if resolved is None:
+            _inc("aegis_approval_mint_total", result="unauthorized")
+            return jsonify({"error": "approver credential required — send "
+                                     "X-Aegis-Approver-Key"}), 401
+        if who and who.strip() != resolved:
+            return jsonify({"error": "approver in body does not match the presented "
+                                     "approver credential"}), 403
+        who = resolved
+    elif runtime.is_production():
+        return jsonify({"error": "production mode requires AEGIS_APPROVER_KEYS"}), 503
+    if runtime.is_production() and not isinstance(bundle, dict):
+        return jsonify({"error": "production mode mints v2 tokens only — send the sealed "
+                                 "bundle (binds config + inventory, enables SoD check)"}), 400
+    if isinstance(bundle, dict):
+        op = str(bundle.get("operator") or "").strip().lower()
+        if op and op == str(who).strip().lower():
+            _inc("aegis_approval_mint_total", result="sod_denied")
+            return jsonify({"error": "separation of duties: the change's operator cannot "
+                                     "approve it"}), 403
     try:
         ttl = int(data.get("ttl_sec") or 14400)
-        who = data.get("approver") or ""
         if isinstance(bundle, dict):
             if not bundler_verify(bundle):
                 return jsonify({"error": "bundle integrity verification failed "
                                          "(content does not match integrity.sha256)"}), 422
             token = mint_token_for_bundle(who, bundle, ttl_sec=ttl)
             digest, cfg, inv = digests_from_bundle(bundle)
+            _inc("aegis_approval_mint_total", result="v2")
+            _LEDGER.append("approval_minted", run_id=bundle.get("run_id"),
+                           bundle_sha256=digest, approver=who.strip(), version=2, ttl_sec=ttl)
             return jsonify({
                 "token": token,
                 "alg": "hmac-sha256",
@@ -290,6 +438,9 @@ def approve_mint():
     except (TokenError, TypeError, ValueError) as e:
         return jsonify({"error": str(e)}), 400
     digest = (data.get("bundle_sha256") or "").strip().lower()
+    _inc("aegis_approval_mint_total", result="hash_only")
+    _LEDGER.append("approval_minted", bundle_sha256=digest, approver=str(who).strip(),
+                   version=None, ttl_sec=ttl)
     cfg = (data.get("config_sha256") or "").strip().lower() or None
     inv = (data.get("inventory_sha256") or "").strip().lower() or None
     version = 2 if (cfg and inv) else 1
@@ -298,7 +449,7 @@ def approve_mint():
         "alg": "hmac-sha256",
         "version": version,
         "bound_to": digest,
-        "approver": (data.get("approver") or "").strip(),
+        "approver": str(who).strip(),
     }
     if version == 2:
         body["config_sha256"] = cfg
@@ -327,11 +478,19 @@ def preflight_promote():
             approval_token=data.get("approval_token"),
             allow_live=allow_live,
             live_inventory_sha256=data.get("inventory_sha256"),
+            # A1: the server ALWAYS authenticates the bundle with its pinned seal key —
+            # a self-hashed forgery fails G0 before any other rule runs.
+            seal=bundle.get("seal"), verifier=_VERIFIER, require_seal=True,
+            require_verified_approval=runtime.is_production(),
+            ledger=_LEDGER,
         )
     except PromoteDenied as e:
+        _inc("aegis_promotions_total", status="denied")
         return jsonify({"error": str(e), "denied": True}), 403
     except Exception as e:  # noqa: BLE001
-        return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
+        _inc("aegis_promotions_total", status="error")
+        return jsonify({"error": _client_error(e)}), 500
+    _inc("aegis_promotions_total", status=rec["status"])
     return jsonify(rec)
 
 
@@ -350,6 +509,7 @@ def seal_verify():
     if not isinstance(bundle, dict) or not isinstance(seal, dict):
         return jsonify({"error": "body must be {bundle, seal}"}), 400
     v = verify_seal(bundle, seal, _VERIFIER)
+    _inc("aegis_seal_verify_total", result="valid" if v.valid else "invalid")
     return jsonify({"valid": v.valid, "gate": v.gate, "reason": v.reason}), (200 if v.valid else 422)
 
 

@@ -133,7 +133,7 @@ docker load -i aegis-local.tar
 docker compose -f docker-compose.yml -f docker-compose.airgap.yml up  # network_mode: none
 ```
 
-## Test — 9 CI suites, 0 violations
+## Test — 15 CI suites + SAST/SCA + container smoke, 0 violations
 
 ```bash
 pip install -r requirements.txt
@@ -144,7 +144,19 @@ python -m aegis.tests.promote_test 6000      # Phase 2 approval-gate safety (G1�
 python -m aegis.tests.tokens_test            # HMAC approval tokens (T1 #9)
 python -m aegis.tests.oscal_test             # OSCAL AR + CAB export (integrity-gated)
 python -m aegis.tests.compliance_test        # 11-framework self-tests + schema-valid bundle
+python -m aegis.tests.hardening_test         # seal-at-gate, SoD, replay, ledger, prod mode, offline verify
+# also in CI: seal_test, authority_test, ceiling_test, llm_egress_test, wedge_test
 ```
+
+Offline auditor check (no server, public key only):
+
+```bash
+python -m aegis.verify --bundle run.json --pubkey pubkey.json     # integrity + Ed25519 seal
+python -m aegis.verify --ledger /var/lib/aegis/ledger.jsonl       # hash-chain audit log
+```
+
+Production deployment (fail-closed mode, SSO-less approver identities, ledger, keys):
+see [`SECURITY.md`](SECURITY.md).
 
 | Suite | Scale | In CI |
 |---|---|---|
@@ -156,11 +168,13 @@ python -m aegis.tests.compliance_test        # 11-framework self-tests + schema-
 | twin safety + mgmt isolation | 8,000 ops | yes |
 | HMAC approval tokens | 17 property checks | yes |
 | OSCAL AR + CAB export | integrity-gated JSON | yes |
-| compliance frameworks | per-module `SELF_TEST` | yes |
+| compliance frameworks | per-module `SELF_TEST` (incl. Junos set + `{}` form) | yes |
+| seal / authority / ceiling / LLM egress / wedge | property suites | yes |
+| hardening (G0 seal, SoD, replay, ledger, prod mode, CLI) | 53 checks | yes |
+| Bandit SAST · pip-audit · container smoke | gate on HIGH / any CVE / non-root | yes |
 
-Local-only property suites (not in `.github/workflows/test.yml`): `llm_egress_test`,
-`authority_test`, `ceiling_test`, `seal_test`, `wedge_test`. HMAC tokens and OSCAL/CAB
-run in CI. See [`docs/DEVELOPER.md`](docs/DEVELOPER.md).
+See [`docs/DEVELOPER.md`](docs/DEVELOPER.md). Strategy, competitor analysis and roadmap:
+[`docs/STRATEGY_2026-10.md`](docs/STRATEGY_2026-10.md).
 
 ## Layout
 
@@ -170,8 +184,12 @@ core/backends/       pluggable: simulator (CI) | http (live :5757)
 core/llm/            single LLM egress · air-gap loopback check · model identity
 core/risk/           authority ceiling (AUTO / HITL / HOTL / BLOCK)
 core/seal/           detached CROSS-3 receipt (model + ceiling + bundle hash)
-core/promote/        Phase 2 approval gate G1–G5 + HMAC tokens + connectors (dry-run default)
-evidence/            bundler · sha256 integrity · OSCAL AR · CAB one-pager · 11-framework crosswalk · PDF
+core/promote/        approval gate G0–G5 + SoD · HMAC tokens (single-use) · approver registry · connectors
+core/runtime.py      community vs production (fail-closed) mode
+evidence/            bundler · sha256 integrity · OSCAL AR · CAB · 11-framework crosswalk · PDF
+evidence/ledger.py   append-only hash-chained audit ledger
+evidence/secrets.py  vendor-aware secret detection + redaction · evidence/junos.py {}→set
+verify.py            offline auditor CLI (integrity + seal + ledger)
 ui/                  self-contained PreFlight dashboard
 serve.py             standalone community server (sim tier)
 docs/                ARCHITECTURE.md · COMPLIANCE.md · DEVELOPER.md · EVIDENCE.md · GO_LIVE.md

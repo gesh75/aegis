@@ -6,6 +6,11 @@ hash — a tamper-evident audit trail linking "what was validated" to "what was 
 
 The raw approval token is never written. The record stores method + token sha256 so an
 examiner can see whether G2/G3 ran HMAC or the asserted-unverified honesty tier.
+
+With a ``ledger`` (evidence/ledger.py) every promotion and denial is appended to the
+hash-chained audit log, and an HMAC approval token is SINGLE-USE: it is claimed
+atomically before the first push, so replaying it — even after a restart, when the
+ledger is file-backed — is a deny.
 """
 from __future__ import annotations
 import hashlib
@@ -30,7 +35,9 @@ def _sha256(obj: dict) -> str:
 
 def promote(bundle: dict, *, connector: ProdConnector, approver: str | None = None,
             approval_token: str | None = None, allow_live: bool = False,
-            live_inventory_sha256: str | None = None) -> dict:
+            live_inventory_sha256: str | None = None, ledger=None,
+            seal: dict | None = None, verifier=None, require_seal: bool = False,
+            require_verified_approval: bool = False) -> dict:
     configs = (bundle.get("change") or {}).get("generated_configs") or []
     if not configs:
         raise PromoteDenied("nothing to promote")
@@ -38,9 +45,25 @@ def promote(bundle: dict, *, connector: ProdConnector, approver: str | None = No
     decision = gate.evaluate(
         bundle, approver=approver, approval_token=approval_token,
         connector_is_live=getattr(connector, "live", False), allow_live=allow_live,
-        live_inventory_sha256=live_inventory_sha256)
+        live_inventory_sha256=live_inventory_sha256, seal=seal, verifier=verifier,
+        require_seal=require_seal, require_verified_approval=require_verified_approval)
+    run_id = bundle.get("run_id")
+    src_sha = (bundle.get("integrity") or {}).get("sha256")
     if not decision.allowed:
+        if ledger is not None:
+            ledger.append("promotion_denied", run_id=run_id, source_sha256=src_sha,
+                          approver=approver, reason=decision.reason)
         raise PromoteDenied(decision.reason)
+
+    # single-use approval: claim BEFORE the first push so two concurrent promotions with
+    # one token cannot both proceed. A failed push still burns the token (re-approve).
+    if ledger is not None and decision.approval_method == "hmac-sha256" and decision.token_sha256:
+        if not ledger.claim_token(decision.token_sha256, run_id=run_id,
+                                  source_sha256=src_sha, approver=approver):
+            reason = "approval token already used — tokens are single-use (replay denied)"
+            ledger.append("promotion_denied", run_id=run_id, source_sha256=src_sha,
+                          approver=approver, reason=reason)
+            raise PromoteDenied(reason)
 
     now = datetime.now(timezone.utc).isoformat()
     pushed = []
@@ -74,4 +97,9 @@ def promote(bundle: dict, *, connector: ProdConnector, approver: str | None = No
         "integrity": {"sha256": "", "generated_by": "AEGIS", "egress": "none"},
     }
     record["integrity"]["sha256"] = _sha256(record)
+    if ledger is not None:
+        ledger.append("promotion", promotion_id=record["promotion_id"], run_id=run_id,
+                      source_sha256=src_sha, record_sha256=record["integrity"]["sha256"],
+                      connector=record["connector"], status=record["status"],
+                      approver=approver, approval_method=decision.approval_method)
     return record

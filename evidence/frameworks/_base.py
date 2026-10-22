@@ -23,8 +23,10 @@ never that the org is "certified". Keep evidence strings specific and truthful.
 """
 from __future__ import annotations
 from dataclasses import dataclass
+from functools import cached_property
 
 from ...core.backends.base import GeneratedConfig, BatfishResult, TwinResult, DiffResult  # noqa: F401
+from .. import junos, secrets
 
 PASS = "pass"
 FAIL = "fail"
@@ -49,8 +51,24 @@ class ComplianceSignal:
 
     # ---- derived, reusable predicates -----------------------------------
     def text(self) -> str:
-        """All proposed config concatenated + lowercased (cheap to recompute)."""
-        return "\n".join(c["config"].lower() for c in self.configs)
+        """All proposed config concatenated + lowercased.
+
+        Junos configs pasted in hierarchical ``{ }`` form are flattened to ``set`` lines
+        first (inactive statements dropped), so every line-oriented check sees the same
+        shape for Junos as for ``display set`` output. Memoized: ~20 checks call this per
+        run and the signal is immutable (cached_property writes __dict__, so it works on
+        the frozen dataclass)."""
+        return self._text
+
+    @cached_property
+    def _text(self) -> str:
+        parts = []
+        for c in self.configs:
+            cfg = c.get("config") or ""
+            if c.get("vendor") == "junos" or junos.looks_hierarchical(cfg):
+                cfg = junos.to_set(cfg)
+            parts.append(cfg.lower())
+        return "\n".join(parts)
 
     def findings(self) -> list[str]:
         return [str(f) for f in (self.batfish.get("findings") or [])]
@@ -66,8 +84,23 @@ class ComplianceSignal:
     def has_routing_proto(self) -> bool:
         return self.has_bgp() or self.has_token("ospf", "isis", "rip")
 
+    def plaintext_secret_labels(self) -> list[str]:
+        """Which cleartext-credential patterns matched (labels only, never values)."""
+        return list(self._plaintext_labels)
+
+    @cached_property
+    def _plaintext_labels(self) -> tuple[str, ...]:
+        return tuple(secrets.plaintext_hits(self.text()))
+
     def has_plaintext_secret(self) -> bool:
-        return self.has_token("plaintext", "abc123", "password 0 ", "key 0 ")
+        """Vendor-aware cleartext credential detection (evidence/secrets.py): Cisco type 0
+        and bare passwords/keys, OSPF/AAA keys, SNMP v1/v2c communities, Junos keys not in
+        $9$ form, plus the simulator's demo markers."""
+        return bool(self.plaintext_secret_labels())
+
+    def reversible_secret_labels(self) -> list[str]:
+        """Cisco type 7 / Junos $9$ — obfuscated, trivially reversible. Reported, not failed."""
+        return secrets.reversible_hits(self.text())
 
     def missing_export_policy(self) -> bool:
         return any("without export policy" in f for f in self.findings())

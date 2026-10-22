@@ -18,6 +18,7 @@ Usage:  python3 -m aegis.tests.oscal_test
 from __future__ import annotations
 import copy
 import sys
+import uuid
 
 from ..core.orchestrator.pipeline import run_preflight
 from ..core.backends.simulator import SimulatorBackend
@@ -41,6 +42,14 @@ def _run(intent: str) -> dict:
                          frameworks=["pci_dss_v4"], operator="ci")
 
 
+def _same_uuid(a, run_id: str) -> bool:
+    """OSCAL uuids are RFC 4122 dashed; run_id is the same UUID as 32 hex chars."""
+    try:
+        return uuid.UUID(str(a)).hex == run_id and "-" in str(a)
+    except ValueError:
+        return False
+
+
 def _findings(ar: dict) -> list:
     return ((ar.get("assessment-results") or {}).get("results") or [{}])[0].get("findings") or []
 
@@ -60,7 +69,7 @@ def main() -> int:
     check("oscal.version", meta.get("oscal-version") == OSCAL_VERSION, str(meta.get("oscal-version")))
     remarks = str(meta.get("remarks", ""))
     check("oscal.not_fedramp", "not a fedramp" in remarks.lower(), remarks[:80])
-    check("oscal.uuid", (ar.get("assessment-results") or {}).get("uuid") == clean["run_id"],
+    check("oscal.uuid", _same_uuid((ar.get("assessment-results") or {}).get("uuid"), clean["run_id"]),
           str((ar.get("assessment-results") or {}).get("uuid")))
     clean_findings = _findings(ar)
     check("oscal.clean_no_findings", len(clean_findings) == 0,
@@ -114,7 +123,7 @@ def main() -> int:
     body = r.get_json() if r.status_code == 200 else {}
     check("http.oscal.200", r.status_code == 200, f"{r.status_code} {r.get_data(as_text=True)[:120]}")
     check("http.oscal.ctype", r.mimetype == "application/json", r.mimetype)
-    check("http.oscal.shape", (body.get("assessment-results") or {}).get("uuid") == clean["run_id"],
+    check("http.oscal.shape", _same_uuid((body.get("assessment-results") or {}).get("uuid"), clean["run_id"]),
           str((body.get("assessment-results") or {}).get("uuid")))
     check("http.oscal.kind", body.get("kind") == EXPORT_KIND, str(body.get("kind")))
 

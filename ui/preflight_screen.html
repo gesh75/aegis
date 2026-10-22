@@ -91,11 +91,18 @@
       <option value="ios">ios</option>
       <option value="panos">panos</option>
     </select>
-    <select id="lab">
+    <select id="lab" title="reference twin topology">
       <option value="clos-evpn">clos-evpn</option>
-      <option value="minimal">minimal</option>
-      <option value="3tier">3tier</option>
+      <option value="dcn-10node">dcn-10node</option>
+      <option value="edge-slice">edge-slice (junos+ios)</option>
+      <option value="single">single</option>
     </select>
+    <input id="changeRef" placeholder="change ref (e.g. CHG0012345)" maxlength="64"
+           title="ITSM change number — sealed into the bundle; required in production mode"
+           style="width:13em"/>
+    <input id="apiKey" type="password" placeholder="API key (if required)" autocomplete="off"
+           title="X-Aegis-Key — kept in this tab's sessionStorage only" style="width:11em"
+           onchange="sessionStorage.setItem('aegisKey', this.value)"/>
     <select id="mode" onchange="modeHint()" title="sim = offline demo (zero deps) · live = operator/air-gapped path (needs API key + self-hosted LLM + containerlab)">
       <option value="sim">sim</option>
       <option value="live">live</option>
@@ -153,6 +160,13 @@ function modeHint(){
     : '';
 }
 
+function apiHeaders(){
+  const h={"Content-Type":"application/json"};
+  const k=(document.getElementById('apiKey').value||sessionStorage.getItem('aegisKey')||'').trim();
+  if(k) h["X-Aegis-Key"]=k;
+  return h;
+}
+
 async function runPreflight(){
   const btn=document.getElementById('go'); btn.disabled=true;
   setSteps(true);
@@ -162,9 +176,12 @@ async function runPreflight(){
     source:source,
     lab:document.getElementById('lab').value,
     mode:document.getElementById('mode').value,
-    frameworks:["pci_dss_v4","disa_stig","cis_v8","nist_csf_2.0","nerc_cip","hipaa","iso_27001"],
-    approver:"noc-lead"
+    frameworks:["pci_dss_v4","disa_stig","cis_v8","nist_csf_2.0","nist_800-53","nist_800-171",
+                "soc2","nerc_cip","hipaa","iso_27001","iec_62443"]
+    // no approver here on purpose: approval is a separate person + HMAC token at promotion
   };
+  const ref=document.getElementById('changeRef').value.trim();
+  if(ref) body.change_ref=ref;
   if(source==='config_import'){
     body.config=document.getElementById('configText').value;
     body.vendor=document.getElementById('vendor').value;
@@ -174,7 +191,7 @@ async function runPreflight(){
   }
   try{
     const r=await fetch(API+"/api/preflight/run",{method:"POST",
-      headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+      headers:apiHeaders(),body:JSON.stringify(body)});
     const data=await r.json();
     if(!r.ok){render_err(data);} else {render(data);}
   }catch(e){render_err({error:String(e),stage:"network"});}
@@ -223,7 +240,7 @@ let LAST_BUNDLE=null;
 async function downloadPdf(){
   if(!LAST_BUNDLE) return;
   const r=await fetch(API+"/api/preflight/evidence/pdf",{method:"POST",
-    headers:{"Content-Type":"application/json"},body:JSON.stringify(LAST_BUNDLE)});
+    headers:apiHeaders(),body:JSON.stringify(LAST_BUNDLE)});
   if(!r.ok){alert("PDF failed: "+(await r.text()));return;}
   const blob=await r.blob();
   const a=document.createElement('a');

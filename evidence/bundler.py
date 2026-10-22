@@ -31,18 +31,21 @@ def build_bundle(*, run_id, created, operator, intent, source, configs, batfish,
                  approval_utc, rollback_plan, decision, reason,
                  model_identity: dict | None = None,
                  authority: dict | None = None,
-                 signed: bool = False) -> dict:
+                 signed: bool = False,
+                 change_ref: str | None = None,
+                 rollback_verified: bool = False) -> dict:
     severity = _severity(diff["devices_affected"],
                          len(diff["sessions_dropped"]),
                          batfish["errors"], twin["converged"])
     bundle = {
-        "bundle_version": "1.2",
+        "bundle_version": "1.3",
         "run_id": run_id,
         "created_utc": created,
         "operator": operator,
         "change": {
             "intent": intent,
             "source": source,
+            "change_ref": change_ref,
             "generated_configs": [
                 {"device": c["device"], "vendor": c["vendor"],
                  "config": c["config"], "grounded_commands": c["grounded_commands"]}
@@ -83,7 +86,11 @@ def build_bundle(*, run_id, created, operator, intent, source, configs, batfish,
             },
             "compliance": compliance,
         },
-        "rollback": {"plan": rollback_plan, "tested_in_twin": twin["converged"]},
+        # v1.3: forward convergence is NOT a tested rollback. Until a backend actually
+        # applies the reversal in the twin and re-checks state, the plan is a plan.
+        "rollback": {"plan": rollback_plan, "tested_in_twin": bool(rollback_verified),
+                     "verification": ("executed-in-twin" if rollback_verified
+                                      else "plan-only")},
         "verdict": {"decision": decision, "reason": reason},
         "integrity": {
             "sha256": "",
