@@ -315,6 +315,15 @@ def http_contract() -> None:
     lv = r.get_json() or {}
     check("H9.ledger_verify", r.status_code == 200 and lv.get("valid") is True
           and lv.get("entries_checked", 0) >= 1, str(lv))
+    r = c.get("/preflight.js")
+    check("H9.ui_js_served", r.status_code == 200 and "addEventListener" in r.get_data(as_text=True),
+          str(r.status_code))
+    csp = r.headers.get("Content-Security-Policy") or ""
+    check("H9.csp_no_inline_script", "script-src 'self';" in csp and "script-src 'self' 'unsafe-inline'" not in csp,
+          csp)
+    ui = c.get("/preflight").get_data(as_text=True)
+    check("H9.ui_no_inline_handlers", "onclick=" not in ui and "onchange=" not in ui
+          and "<script>" not in ui, "inline script/handler present")
     r = c.get("/api/status")
     check("H9.status_mode", (r.get_json() or {}).get("mode") == "community", r.get_data(as_text=True))
 

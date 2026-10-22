@@ -101,6 +101,10 @@ findings. Full analysis, competitor matrix and roadmap: `docs/STRATEGY_2026-10.m
   `router bgp N`, `local-as`, `autonomous-system`, RD and RT stay BLOCK. Previously no BGP
   neighbor add could ever be sealed or promoted.
 - `HttpBackend` rejects non-http(s) URLs (Bandit B310).
+- **CSP drops `script-src 'unsafe-inline'` (A10).** The UI script moved to `/preflight.js`
+  and handlers are wired with `addEventListener` and event delegation. This was verified in
+  headless Chromium under the real header: zero CSP violations, and run, PDF download and
+  the source toggle all work. `style-src 'unsafe-inline'` remains.
 
 #### Performance
 - `ComplianceSignal.text()` and the secret scan are memoized. With 11 frameworks the sim

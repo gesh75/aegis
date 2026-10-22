@@ -39,14 +39,16 @@ from aegis.core import runtime
 from aegis.evidence.ledger import Ledger
 
 _UI = os.path.join(os.path.dirname(__file__), "ui", "preflight_screen.html")
+_UI_JS = os.path.join(os.path.dirname(__file__), "ui", "preflight.js")
 
 # Content-Security-Policy shared by the response header and the UI <meta> tag.
-# default-src 'self' locks origins down; 'unsafe-inline' is required because the
-# PreFlight UI ships inline <style>, inline event handlers and one inline <script>
-# (no external assets, no eval). connect-src allows the same-origin API plus the
-# localhost fallback the UI uses when opened over http on a dev box.
+# default-src 'self' locks origins down. Scripts: 'self' only — the UI script is served
+# from /preflight.js and every handler is wired with addEventListener, so injected markup
+# cannot execute (A10). Styles keep 'unsafe-inline' (inline style attributes; far lower
+# risk than script). connect-src allows the same-origin API plus the localhost fallback
+# the UI uses when opened over http on a dev box.
 _CSP = ("default-src 'self'; "
-        "script-src 'self' 'unsafe-inline'; "
+        "script-src 'self'; "
         "style-src 'self' 'unsafe-inline'; "
         "connect-src 'self' http://localhost:5757; "
         "img-src 'self' data:; "
@@ -184,6 +186,12 @@ def favicon() -> Response:
 def ui():
     with open(_UI, encoding="utf-8") as fh:
         return Response(fh.read(), mimetype="text/html")
+
+
+@app.get("/preflight.js")
+def ui_js():
+    with open(_UI_JS, encoding="utf-8") as fh:
+        return Response(fh.read(), mimetype="application/javascript")
 
 
 @app.get("/api/status")
