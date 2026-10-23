@@ -21,11 +21,18 @@
 [![status](https://img.shields.io/badge/status-v0.2.0-8a5cf6.svg)](docs/PHASES.md)
 [![phase](https://img.shields.io/badge/phase-2_closed-2ea44f.svg)](docs/PHASES.md)
 
-The air-gapped, self-hosted answer to Forward Predict / NetPilot: those are
-cloud-by-architecture, so regulated networks that legally cannot send topology/config
-off-prem are locked out of them. AEGIS runs the same **change → twin → validate → evidence**
-loop on a self-hosted LLM + containerlab, and emits a tamper-evident, framework-mapped,
-examiner-ready evidence bundle.
+The open-source **evidence and governance layer for network change**, including changes
+proposed by AI agents.
+
+AEGIS runs a **change → twin → validate → evidence** loop on a self-hosted LLM and
+containerlab, entirely inside your perimeter. It emits a bundle an auditor can verify
+**offline with a public key**: an Ed25519 seal over the evidence, the proposing model's
+identity and the autonomy bound. Promotion is gated by separation of duties and single-use
+approvals, and every decision lands in a hash-chained ledger.
+
+Commercial platforms (Forward, IP Fabric, NetBrain) go deeper on network modelling, and
+several now offer on-prem or air-gapped deployment. AEGIS complements them; it does not
+replace them. See [`docs/STRATEGY_2026-10.md`](docs/STRATEGY_2026-10.md) §3.
 
 ![AEGIS architecture](docs/architecture.svg)
 
@@ -58,12 +65,18 @@ authorizes, and the sealed bundle proves nothing left the perimeter.
 
 ## Why it's different
 
-| | Forward Predict | NetPilot | **AEGIS** |
+Vendor facts are as published on 2026-10-23. "?" means not found in the vendor's public
+material, which is not proof of absence. Sources are in `docs/STRATEGY_2026-10.md` §3.8.
+
+| | Forward Enterprise + Predict | NetPilot | **AEGIS** |
 |---|---|---|---|
-| Twin | math model | cloud emulation | **real on-host emulation (containerlab)** |
-| Hosting | SaaS | cloud | **on-prem / air-gapped** |
-| LLM | cloud | cloud | **self-hosted (zero egress)** |
-| Output | report | — | **sealed, PCI/SOC2/NIST-mapped evidence + PDF** |
+| Twin | mathematical model (Predict GA 2026-09-29) | real NOS containers | **containerlab emulation** (live tier) / simulator (community) |
+| Hosting | on-prem or SaaS | cloud; on-prem / air-gapped via sales | **on-prem / air-gapped, open source** |
+| LLM | Forward AI (hosting model: ?) | local LLM on-prem (vendor claim) | **self-hosted, loopback-enforced** |
+| Reachability / ACL analysis | **yes** | in-lab | not yet (roadmap: Batfish) |
+| Evidence an auditor verifies offline | ? | ? | **Ed25519-sealed bundle + `aegis.verify`** |
+| Approval: SoD + single-use, bound to config | ? | ? | **yes, plus hash-chained ledger** |
+| Output | reports / API | pre/post diff | **sealed, 11-framework evidence + PDF / OSCAL / CAB** |
 
 ## 🏛️ Architecture
 
@@ -170,7 +183,7 @@ see [`SECURITY.md`](SECURITY.md).
 | OSCAL AR + CAB export | integrity-gated JSON | yes |
 | compliance frameworks | per-module `SELF_TEST` (incl. Junos set + `{}` form) | yes |
 | seal / authority / ceiling / LLM egress / wedge | property suites | yes |
-| hardening (G0 seal, SoD, replay, ledger, prod mode, CLI) | 53 checks | yes |
+| hardening (G0 seal, SoD, replay, ledger, SIEM anchor, peer-AS policy, CSP, prod mode, CLI) | 65 checks | yes |
 | Bandit SAST · pip-audit · container smoke | gate on HIGH / any CVE / non-root | yes |
 
 See [`docs/DEVELOPER.md`](docs/DEVELOPER.md). Strategy, competitor analysis and roadmap:

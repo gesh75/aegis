@@ -5,6 +5,18 @@ versioning is [SemVer](https://semver.org).
 
 ## [Unreleased]
 
+### Docs: competitive landscape and positioning correction (2026-10-23)
+- `docs/STRATEGY_2026-10.md` §3 adds a sourced market map (12 vendors and categories), two
+  capability matrices (assurance depth; governance and evidence), ranked gaps and
+  advantages, market signals, a recommendation (AEGIS + Batfish pilot) and RFP questions.
+  Every claim carries a Confirmed / Inferred / Unknown label.
+- **Positioning corrected.** README and Pages no longer say Forward and NetPilot are
+  "cloud-by-architecture". Forward Enterprise documents on-prem deployment, Forward Predict
+  went GA on 2026-09-29, and NetPilot offers an air-gapped option. AEGIS is now positioned as
+  the open-source, offline-verifiable evidence and governance layer.
+  `docs/PHASES.md` is annotated, not rewritten. The older launch copy is flagged in the
+  strategy doc (§8).
+
 ### 2026-10 security & product audit (bundle v1.3)
 
 Driven by a cross-session audit: the earlier review's findings A1–A10, re-checked against the code, plus new
