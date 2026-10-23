@@ -3,4 +3,4 @@ flask>=3.0,<4
 reportlab>=4.0,<5
 cryptography>=42
 httpx>=0.27,<1
-gunicorn>=22,<24
+gunicorn>=26.2.0,<27
