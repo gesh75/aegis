@@ -1,0 +1,5 @@
+# Test + security tooling (CI only — not installed in the runtime image)
+-r requirements.txt
+jsonschema>=4.17,<5
+bandit>=1.7.9
+pip-audit>=2.7

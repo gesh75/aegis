@@ -28,7 +28,8 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
                   source: str = "nl_intent",
                   approver: str | None = None,
                   imported_configs: list[dict] | None = None,
-                  model_identity: dict | None = None) -> dict:
+                  model_identity: dict | None = None,
+                  change_ref: str | None = None) -> dict:
     frameworks = frameworks or ["pci_dss_v4"]
     run_id = uuid.uuid4().hex
     created = datetime.now(timezone.utc).isoformat()
@@ -123,7 +124,7 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
             approver=approver if approval_granted else None,
             approval_utc=created if approval_granted else None,
             rollback_plan=plan, decision=decision, reason=reason,
-            model_identity=mi, authority=authority,
+            model_identity=mi, authority=authority, change_ref=change_ref,
         )
     finally:
         if twin_id is not None:

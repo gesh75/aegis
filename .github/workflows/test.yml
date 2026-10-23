@@ -24,9 +24,9 @@ jobs:
           python-version: "3.11"
 
       - name: Install deps
-        run: pip install -r aegis/requirements.txt
+        run: pip install -r aegis/requirements-dev.txt
 
-      # run from the workspace root (the parent of aegis/) — 6 suites, 0 violations
+      # run from the workspace root (the parent of aegis/) — 15 suites, 0 violations
       - name: Pipeline invariants (25k, 8 invariants, adversarial + concurrency)
         run: python -m aegis.tests.stress_test 25000
 
@@ -53,3 +53,71 @@ jobs:
 
       - name: Compliance frameworks (per-framework self-tests + schema-valid multi-framework bundle)
         run: python -m aegis.tests.compliance_test
+
+      # previously local-only — these prove the seal / ceiling / egress claims
+      - name: CROSS-3 seal (sign, verify G0-G6, tamper)
+        run: python -m aegis.tests.seal_test
+
+      - name: Authority model (severity x change-class)
+        run: python -m aegis.tests.authority_test
+
+      - name: No-self-escalation ceiling
+        run: python -m aegis.tests.ceiling_test
+
+      - name: LLM single-egress + air-gap loopback
+        run: python -m aegis.tests.llm_egress_test
+
+      - name: Model-identity wedge
+        run: python -m aegis.tests.wedge_test
+
+      - name: Hardening (seal-at-gate, SoD, replay, ledger, production mode, offline verify)
+        run: python -m aegis.tests.hardening_test
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          path: aegis
+          persist-credentials: false
+
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        with:
+          python-version: "3.11"
+
+      - name: Install tooling
+        run: pip install -r aegis/requirements-dev.txt
+
+      # SAST: HIGH severity gates the build; the full medium+ report is printed for review
+      - name: Bandit (SAST)
+        run: |
+          bandit -r aegis -x aegis/tests -f txt -ll --exit-zero
+          bandit -r aegis -x aegis/tests -lll
+
+      # SCA: any known-vulnerable runtime dependency fails the build
+      - name: pip-audit (dependency CVEs)
+        run: pip-audit -r aegis/requirements.txt --progress-spinner off
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Build image
+        run: docker build -t aegis:ci .
+
+      - name: Smoke test (non-root, healthz, run, metrics)
+        run: |
+          docker run -d --name aegis-ci -p 127.0.0.1:8088:8088 --read-only --tmpfs /tmp \
+            --cap-drop ALL --security-opt no-new-privileges:true aegis:ci
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8088/healthz && break; sleep 1; done
+          test "$(docker exec aegis-ci id -u)" = "10001"
+          curl -fsS -X POST http://127.0.0.1:8088/api/preflight/run \
+            -H 'Content-Type: application/json' \
+            -d '{"intent":"add vlan 10 to leaf-1","lab":"single","change_ref":"CHG0012345"}' \
+            | python3 -c 'import json,sys; b=json.load(sys.stdin); assert len(b["integrity"]["sha256"])==64; assert b["change"]["change_ref"]=="CHG0012345"; print("run ok", b["verdict"]["decision"])'
+          curl -fsS http://127.0.0.1:8088/metrics | grep -q aegis_preflight_runs_total
+          docker logs aegis-ci | tail -5
+          docker rm -f aegis-ci

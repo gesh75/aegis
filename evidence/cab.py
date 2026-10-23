@@ -26,8 +26,9 @@ def _rollback_steps(bundle: dict) -> list:
     return []
 
 
-def to_cab(bundle: dict) -> dict:
-    """Pure function. Does not verify the bundle — callers must bundler.verify first."""
+def to_cab(bundle: dict, authenticity: str | None = None) -> dict:
+    """Pure function. Does not verify the bundle — callers must bundler.verify first.
+    ``authenticity`` is the caller's seal verdict, copied verbatim into the packet."""
     change = bundle.get("change") or {}
     twin = bundle.get("twin") or {}
     verdict = bundle.get("verdict") or {}
@@ -46,6 +47,7 @@ def to_cab(bundle: dict) -> dict:
         "operator": bundle.get("operator"),
         "intent": bundle.get("intent") or change.get("intent"),
         "source": bundle.get("source") or change.get("source"),
+        "change_ref": change.get("change_ref"),
         "what_changed": [
             {
                 "device": c.get("device"),
@@ -74,5 +76,6 @@ def to_cab(bundle: dict) -> dict:
         "risk_tier": change.get("risk_tier"),
         "integrity": bundle.get("integrity"),
         "seal_present": isinstance(bundle.get("seal"), dict),
+        "authenticity": authenticity or "not evaluated by caller",
         "seal_reason": bundle.get("seal_reason"),
     }

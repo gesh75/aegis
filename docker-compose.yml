@@ -1,11 +1,26 @@
 # AEGIS community core — `docker compose up` then open http://localhost:8088/preflight
+# Published on host loopback only. To expose on the LAN, put a TLS reverse proxy in front
+# (and set AEGIS_MODE=production with every key) — never publish 0.0.0.0 bare.
 services:
   aegis:
     build: .
     image: aegis:local
     container_name: aegis
     ports:
-      - "8088:8088"
+      - "127.0.0.1:8088:8088"
     environment:
       - AEGIS_PORT=8088
+      - AEGIS_LEDGER_PATH=/var/lib/aegis/ledger.jsonl
+    volumes:
+      - aegis-ledger:/var/lib/aegis
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
+
+volumes:
+  aegis-ledger:

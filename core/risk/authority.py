@@ -63,6 +63,9 @@ class ChangeClass:
     touches_rd_rt: bool = False
     touches_spine: bool = False
     touches_underlay: bool = False
+    # Peer AS (remote-as / peer-as) under AEGIS_PEER_AS_POLICY=hitl: a peering change,
+    # not fabric identity. Under the default policy ("block") it folds into touches_asn.
+    touches_peer_as: bool = False
 
     @property
     def is_fabric_identity(self) -> bool:
@@ -76,6 +79,20 @@ _ASN_RE = re.compile(
     r"(?:autonomous-system|remote-as|peer-as|local-as)\s+\d+|router\s+bgp\s+\d+",
     re.IGNORECASE,
 )
+# Local fabric identity only: the device's own AS. remote-as / peer-as name the NEIGHBOR.
+_LOCAL_ASN_RE = re.compile(
+    r"(?:autonomous-system|local-as)\s+\d+|router\s+bgp\s+\d+", re.IGNORECASE)
+_PEER_ASN_RE = re.compile(r"(?:remote-as|peer-as)\s+\d+", re.IGNORECASE)
+
+
+def peer_as_policy() -> str:
+    """AEGIS_PEER_AS_POLICY: ``block`` (default — peer AS is fabric identity, the original
+    fail-closed behavior) or ``hitl`` (a BGP neighbor add is a peering change: HITL minimum,
+    still never AUTO). Invalid values are fatal, never silently permissive."""
+    raw = (os.environ.get("AEGIS_PEER_AS_POLICY") or "block").strip().lower()
+    if raw not in ("block", "hitl"):
+        raise ValueError(f"AEGIS_PEER_AS_POLICY must be block|hitl (got {raw!r})")
+    return raw
 _RD_RT_RE = re.compile(
     r"route-(?:distinguisher|target)|\brd\s+\d+:\d+|\brt\s+\d+:\d+|target:\d+:\d+",
     re.IGNORECASE,
@@ -89,8 +106,14 @@ def classify_change(configs: list[GeneratedConfig]) -> ChangeClass:
     """Classify candidate configs into fabric-construct flags (the hard-force triggers)."""
     text = "\n".join(c.get("config", "") for c in configs)
     names = " ".join(c.get("device", "") for c in configs)
+    if peer_as_policy() == "hitl":
+        asn = bool(_LOCAL_ASN_RE.search(text))
+        peer = bool(_PEER_ASN_RE.search(text))
+    else:
+        asn, peer = bool(_ASN_RE.search(text)), False
     return ChangeClass(
-        touches_asn=bool(_ASN_RE.search(text)),
+        touches_asn=asn,
+        touches_peer_as=peer,
         touches_rd_rt=bool(_RD_RT_RE.search(text)),
         touches_spine=bool(_SPINE_NAME_RE.search(names)),
         touches_underlay=bool(_UNDERLAY_NAME_RE.search(names) or _UNDERLAY_CONFIG_RE.search(text)),
@@ -140,6 +163,8 @@ def required_authority(severity: Severity, change_class: ChangeClass) -> Tier:
         tier = max(tier, Tier.BLOCK)
     if change_class.touches_spine or change_class.touches_underlay:
         tier = max(tier, Tier.HOTL)
+    if change_class.touches_peer_as:
+        tier = max(tier, Tier.HITL)
     return tier
 
 
@@ -216,5 +241,9 @@ def authority_record(severity: Severity, change_class: ChangeClass,
             "touches_rd_rt": change_class.touches_rd_rt,
             "touches_spine": change_class.touches_spine,
             "touches_underlay": change_class.touches_underlay,
+            # only recorded when the peer-AS policy is in effect, so default bundles keep
+            # their exact v1.2 shape
+            **({"touches_peer_as": change_class.touches_peer_as}
+               if peer_as_policy() == "hitl" else {}),
         },
     }

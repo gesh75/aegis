@@ -20,3 +20,6 @@ services:
     image: aegis:local
     pull_policy: never
     network_mode: none
+    # network_mode:none cannot publish ports — drop the base file's binding
+    # (Compose >= 2.24 `!reset`). Reach the UI via `docker exec` or a socket proxy.
+    ports: !reset []

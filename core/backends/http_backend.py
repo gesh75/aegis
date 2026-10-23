@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from .base import GeneratedConfig, BatfishResult, TwinResult, DiffResult
 
@@ -190,6 +191,10 @@ class HttpBackend:
     def __init__(self, base_url: str = _DEFAULT_BASE,
                  model_runner_url: str = _DEFAULT_MODEL_RUNNER,
                  model: str = "ai/qwen3:latest", timeout: float = 60.0):
+        for url in (base_url, model_runner_url):
+            # B310: urlopen also accepts file:// and custom schemes; only http(s) is legit
+            if urllib.parse.urlsplit(url).scheme not in ("http", "https"):
+                raise ValueError(f"HttpBackend URL must be http(s): {url!r}")
         self.base = base_url.rstrip("/")
         self.model_runner = model_runner_url.rstrip("/")
         self.model = model
@@ -200,7 +205,8 @@ class HttpBackend:
             url, data=json.dumps(body).encode(),
             headers={"Content-Type": "application/json"}, method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as r:  # noqa: S310
+            # scheme pinned to http(s) in __init__
+            with urllib.request.urlopen(req, timeout=self.timeout) as r:  # noqa: S310  # nosec B310
                 return json.loads(r.read().decode())
         except urllib.error.HTTPError as e:
             # surface the failing URL + the server's error body, not just "500"

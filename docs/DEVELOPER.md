@@ -97,18 +97,24 @@ was previously under-counted; do not compare old vs new `bgp_sessions` numbers b
 
 | Change class (regex on candidate config / device name) | Floor |
 |---|---|
-| `router bgp N`, `remote-as`, `local-as`, `peer-as`, `autonomous-system` | BLOCK |
+| `router bgp N`, `remote-as`, `local-as`, `peer-as`, `autonomous-system` | BLOCK (default) |
+| `remote-as` / `peer-as` with `AEGIS_PEER_AS_POLICY=hitl` | ≥ HITL (peering change; `router bgp`/`local-as`/`autonomous-system` stay BLOCK) |
 | `route-distinguisher` / `route-target` / `rd N:N` / `rt N:N` | BLOCK |
 | device name contains `spine`, or OSPF/ISIS/underlay text | ≥ HOTL |
 
 `evaluate()` in `core/promote/gate.py`:
 
+0. G0 — `verify_seal` against the pinned key (server: always). No seal, a foreign key or a
+   mismatched seal → deny.
 1. G1 — `bundler.verify` (sha256, `seal` excluded from the hash)
 2. G2 — `blocked` never promotes; `needs_approval` needs approver + **verified** token
 3. G3 — medium/high risk needs approver + **verified** token
 4. G4 — live connector needs `AEGIS_PROMOTE_ALLOW_LIVE=1`
 5. G5 — re-load ceiling and `authorize(required, ceiling)`. Missing / unknown
    `change.authority` → deny.
+6. SoD — when approval is required, approver ≠ `bundle.operator`.
+7. Single-use — with a `ledger`, an HMAC token is claimed before the first push. A replay
+   → deny.
 
 Token verification (`core/promote/tokens.py`):
 
@@ -133,7 +139,7 @@ The seal (`core/seal/seal.py`) additionally refuses to certify an unbounded chan
 | POST | `/api/preflight/evidence/oscal` | OSCAL-shaped AR JSON. Same integrity gate. Not FedRAMP. |
 | POST | `/api/preflight/evidence/cab` | CAB one-pager. Rollback is a plan, not a verified execution. |
 | POST | `/api/approve/mint` | HMAC token. Body `{bundle}` → **v2** (config + inventory). Hash-only → **v1**. Tampered bundle → **422**. **503** if HMAC unset. |
-| POST | `/api/preflight/promote` | Gate G1–G5 then dry-run (default). Optional `inventory_sha256` live override. **403** on deny. |
+| POST | `/api/preflight/promote` | Gate G0–G5 + SoD + single-use, then dry-run (default). Optional `inventory_sha256` live override. **403** on deny. |
 | GET | `/api/seal/pubkey` | Offline verify material (public). |
 | POST | `/api/seal/verify` | Body `{bundle, seal}` (public). |
 

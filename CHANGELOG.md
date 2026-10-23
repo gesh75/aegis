@@ -5,6 +5,116 @@ versioning is [SemVer](https://semver.org).
 
 ## [Unreleased]
 
+### 2026-10 security & product audit (bundle v1.3)
+
+Driven by a cross-session audit: the earlier review's findings A1–A10, re-checked against the code, plus new
+findings. Full analysis, competitor matrix and roadmap: `docs/STRATEGY_2026-10.md`.
+
+#### Security
+- **Promotion gate authenticates the bundle (A1).** New rule **G0**: the server verifies the
+  detached Ed25519 seal against its pinned key before any other rule runs.
+  `POST /api/preflight/promote` always requires it (`require_seal=True`). Previously G1 only
+  re-hashed the bundle, so a client could forge a `ship_ready`/low bundle, recompute the
+  sha256, and pass.
+- **Exports verify the seal.** PDF, OSCAL and CAB return 422 for a present-but-invalid seal,
+  which used to render as an "offline-verifiable receipt". Every artifact now carries an
+  `authenticity` line ("seal verified …" or "UNSEALED — integrity self-consistency only").
+- **Separation of duties (A2).** The gate and `/api/approve/mint` deny approver == operator
+  whenever approval is required.
+- **Approver identity registry (A2).** With `AEGIS_APPROVER_KEYS` (`name:sha256` entries),
+  minting requires the approver's own `X-Aegis-Approver-Key`, and the identity is taken from
+  that credential, not from the request body or the shared API key.
+  `python -m aegis.core.promote.approvers <name>` generates entries.
+- **Single-use approval tokens (A4).** HMAC tokens are claimed atomically in the ledger
+  before the first push. A replay is denied, including after a restart.
+- **Hash-chained audit ledger (A5).** `evidence/ledger.py` records runs, mints, promotions,
+  denials and consumed tokens, in JSONL with an fcntl lock when `AEGIS_LEDGER_PATH` is set.
+  `GET /api/ledger/verify` re-walks the chain, and a broken chain refuses to load.
+- **Production mode (A3).** With `AEGIS_MODE=production`:
+  - the server refuses to start unless API key, approve key, seal key, ledger path and
+    approver registry are all set;
+  - `asserted-unverified` approvals are denied;
+  - only v2 tokens are minted;
+  - `change_ref` is required and run-time `approver` is rejected;
+  - exports need a seal (blocked verdicts excepted);
+  - internal errors are not echoed to clients.
+- **Container (A6).**
+  - The server now listens on `0.0.0.0` *inside* the container. It used to inherit the
+    127.0.0.1 default, so the published port was unreachable.
+  - Gunicorn (1 worker, 8 threads) replaces the Flask dev server.
+  - Non-root UID 10001, `HEALTHCHECK` on `/healthz`.
+  - Compose publishes on `127.0.0.1` only, with a read-only root FS, `cap_drop: ALL`,
+    `no-new-privileges` and a ledger volume.
+  - `.dockerignore` keeps `.git`, docs, videos and tests out of the image.
+  - The air-gap overlay resets `ports` (it conflicted with `network_mode: none`).
+- **CI (A7).** All 15 suites run in CI. The five that back the seal, ceiling and egress
+  claims were previously local-only, and `hardening_test` is new. New `security` job:
+  Bandit, gating on HIGH, plus pip-audit. New `container` job: build, non-root assertion and
+  a smoke run. Dependabot added, plus `SECURITY.md`.
+- Runtime vs dev requirements split. jsonschema moves from the 2019 3.2.0 pin to the
+  test-only `>=4.17`.
+
+#### Fixed — evidence honesty
+- `rollback.tested_in_twin` was set to *forward convergence*, so bundles, PDFs and the UI
+  said "tested in twin: yes" for a rollback that was never executed. It is now `false`, with
+  `rollback.verification: "plan-only"`.
+- The rollback plan is vendor-aware:
+  - IOS/EOS/FRR: `no …` inside its parent mode;
+  - Junos: `delete …`, plus `commit confirmed` / `rollback 1`;
+  - restoring a deleted value is flagged, never guessed.
+  For real CLI lines the plan used to read "revert -> <same line>".
+- **Secrets are redacted** in PDF configs and rollback steps (`evidence/secrets.py`). This
+  covers cleartext, Cisco type 7, Junos `$9$` and hashes.
+- Every bundle string is escaped before it enters ReportLab markup. Device names or config
+  lines containing `<` previously returned a 500 or injected markup.
+- OSCAL export: RFC 4122 UUIDs, plus `import-ap`, `last-modified`, observation `collected`,
+  and finding `target`. The `change-ref` prop and authenticity remark are new.
+
+#### Fixed — compliance accuracy (affects verdict rows)
+- **Junos support.** Hierarchical `{ }` configs are flattened to `set` lines, and inactive
+  statements are dropped. DISA BGP checks understand Junos peers authenticated at neighbor,
+  group or global level, and per routing-instance. Previously every Junos BGP peer was
+  invisible to CISC-RT-000480.
+- **Real plaintext-secret detection** replaces the `abc123` demo predicate:
+  - Cisco type 0 and bare passwords, key-string, OSPF and AAA keys;
+  - SNMP v1/v2c communities;
+  - Junos keys not in `$9$` form.
+  Type 7 and `$9$` are reported as reversible, not failed (a policy decision; see the
+  strategy doc).
+- **DISA CISC-RT-000050 no longer passes MD5.** `message-digest` / `authentication mode`
+  counted as FIPS 198-1. Now only HMAC-SHA, AES-CMAC or TCP-AO pass. Junos GTSM
+  (`ttl-except 255`) is recognized.
+
+#### Added
+- `change_ref` (ITSM change number), sealed into the bundle as schema v1.3 and shown in the
+  PDF, CAB and OSCAL.
+- `python -m aegis.verify`: an offline auditor CLI for integrity, seal (pinned public key)
+  and ledger chain. Exit codes are 0, 1 and 2.
+- `/metrics` (Prometheus text format: runs by decision, promotions, denials, seal verifies,
+  exports, ledger size) and `/healthz`.
+- UI: change-ref and API-key fields; labs match the backend; all 11 frameworks.
+  **The hard-coded `approver: "noc-lead"` was removed**, so the demo no longer self-approves
+  high-risk changes.
+
+- `AEGIS_PEER_AS_POLICY=hitl` (opt-in; the default `block` is unchanged): a `remote-as` or
+  `peer-as` change, meaning a BGP neighbor add, becomes a peering change at HITL minimum.
+  `router bgp N`, `local-as`, `autonomous-system`, RD and RT stay BLOCK. Previously no BGP
+  neighbor add could ever be sealed or promoted.
+- `HttpBackend` rejects non-http(s) URLs (Bandit B310).
+- **Off-box ledger anchor.** `AEGIS_LEDGER_SYSLOG=host:port[/tcp|/udp]` sends every
+  hash-chained entry to the SIEM as RFC 5424, using the stdlib only. It is best-effort: a SIEM
+  outage never blocks a change. Failures are exposed as `aegis_ledger_anchor_failures_total`.
+- **CSP drops `script-src 'unsafe-inline'` (A10).** The UI script moved to `/preflight.js`
+  and handlers are wired with `addEventListener` and event delegation. This was verified in
+  headless Chromium under the real header: zero CSP violations, and run, PDF download and
+  the source toggle all work. `style-src 'unsafe-inline'` remains.
+
+#### Performance
+- `ComplianceSignal.text()` and the secret scan are memoized. With 11 frameworks the sim
+  pipeline goes from 0.80 to 0.43 ms per run (about 1.9×).
+
+### Earlier unreleased items
+
 Post-0.2.0 hardening that landed on `main` after the 0.2.0 tag. Documented here so
 operators can see fail-closed behavior that is already in the code.
 

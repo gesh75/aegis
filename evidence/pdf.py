@@ -18,6 +18,16 @@ from reportlab.lib.units import mm
 from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
                                 TableStyle, HRFlowable)
 
+from .secrets import redact
+
+
+def _esc(value) -> str:
+    """Escape any bundle-supplied string before it enters ReportLab Paragraph markup.
+    Without this, a config line or device name containing '<' 500s the endpoint, and a
+    crafted one injects markup (e.g. <link>) into an examiner-facing PDF."""
+    return (str(value if value is not None else "—")
+            .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
 _VERDICT_COLOR = {
     "ship_ready": colors.HexColor("#1f8f4e"),
     "blocked": colors.HexColor("#c0392b"),
@@ -57,7 +67,11 @@ def _kv_table(rows, col0=45 * mm):
     return t
 
 
-def render_pdf(bundle: dict) -> bytes:
+def render_pdf(bundle: dict, authenticity: str | None = None) -> bytes:
+    """``authenticity`` is the server's verdict on the detached seal (e.g. "seal verified
+    against pinned key ed25519:abcd" or "UNSEALED — integrity self-consistency only").
+    It is printed under the verdict so an examiner never mistakes a self-hashed bundle
+    for an authenticated one. Config secrets are always redacted in the PDF."""
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, title="AEGIS Evidence Bundle",
                             author="AEGIS", leftMargin=18 * mm, rightMargin=18 * mm,
@@ -69,17 +83,19 @@ def render_pdf(bundle: dict) -> bytes:
     el.append(Paragraph("AEGIS · Evidence Bundle", ss["AegisH1"]))
     el.append(Paragraph(
         f"Air-gapped pre-deployment change validation &nbsp;·&nbsp; run "
-        f"{bundle['run_id']} &nbsp;·&nbsp; {bundle['created_utc']} &nbsp;·&nbsp; "
-        f"operator {bundle.get('operator','—')}", ss["AegisSub"]))
+        f"{_esc(bundle['run_id'])} &nbsp;·&nbsp; {_esc(bundle['created_utc'])} &nbsp;·&nbsp; "
+        f"operator {_esc(bundle.get('operator','—'))}", ss["AegisSub"]))
     el.append(HRFlowable(width="100%", color=_LINE, spaceAfter=8))
 
     # verdict
     v = bundle["verdict"]
     vc = _VERDICT_COLOR.get(v["decision"], _INK)
     el.append(Paragraph(
-        f'<font color="{vc.hexval()}"><b>{v["decision"].replace("_"," ").upper()}'
+        f'<font color="{vc.hexval()}"><b>{_esc(v["decision"].replace("_"," ").upper())}'
         f'</b></font>', ParagraphStyle("vd", fontSize=16, leading=18)))
-    el.append(Paragraph(v["reason"], ss["AegisBody"]))
+    el.append(Paragraph(_esc(v["reason"]), ss["AegisBody"]))
+    if authenticity:
+        el.append(Paragraph(f"<b>Authenticity:</b> {_esc(authenticity)}", ss["AegisBody"]))
     ch = bundle["change"]; br = bundle["validation"]["blast_radius"]
     appr = ch["approval"]
     el.append(Spacer(1, 4))
@@ -89,6 +105,7 @@ def render_pdf(bundle: dict) -> bytes:
         ["Approval", ("required — " + (appr.get("granted_by") or "PENDING"))
          if appr["required"] else "not required"],
         ["Change source", ch["source"]],
+        ["Change ref (ITSM)", ch.get("change_ref") or "— none recorded —"],
     ]))
 
     # digital twin
@@ -108,7 +125,7 @@ def render_pdf(bundle: dict) -> bytes:
     crows = [["Framework", "Control", "Status", "Evidence"]]
     for c in bundle["validation"]["compliance"]:
         crows.append([c["framework"], c["control"], c["status"].upper(),
-                      Paragraph(c["evidence"], ss["AegisBody"])])
+                      Paragraph(_esc(c["evidence"]), ss["AegisBody"])])
     ct = Table(crows, colWidths=[28 * mm, 20 * mm, 18 * mm, None])
     cstyle = [
         ("BACKGROUND", (0, 0), (-1, 0), _INK),
@@ -133,17 +150,18 @@ def render_pdf(bundle: dict) -> bytes:
         f"Static analysis (Batfish): <b>{bf['errors']}</b> errors · "
         f"{bf['warnings']} warnings · {bf['passed']} passed", ss["AegisBody"]))
     for f in bf["findings"][:12]:
-        el.append(Paragraph("• " + f, ss["AegisMono"]))
+        el.append(Paragraph("• " + _esc(f), ss["AegisMono"]))
 
     # generated config
-    el.append(Paragraph("Generated configuration (grounded)", ss["AegisH2"]))
+    el.append(Paragraph("Generated configuration (grounded · secrets redacted)",
+                        ss["AegisH2"]))
     for c in bundle["change"]["generated_configs"]:
-        el.append(Paragraph(f"<b>{c['device']}</b> · {c['vendor']}", ss["AegisBody"]))
-        for line in (c["config"] or "").splitlines():
-            el.append(Paragraph(line.replace("&", "&amp;").replace("<", "&lt;"),
-                                ss["AegisMono"]))
+        el.append(Paragraph(f"<b>{_esc(c['device'])}</b> · {_esc(c['vendor'])}",
+                            ss["AegisBody"]))
+        for line in redact(c["config"] or "").splitlines():
+            el.append(Paragraph(_esc(line), ss["AegisMono"]))
         if c["grounded_commands"]:
-            el.append(Paragraph("grounded: " + " · ".join(c["grounded_commands"]),
+            el.append(Paragraph("grounded: " + _esc(" · ".join(c["grounded_commands"])),
                                 ss["AegisSub"]))
 
     # rollback
@@ -152,19 +170,20 @@ def render_pdf(bundle: dict) -> bytes:
         el.append(Paragraph("Rollback plan", ss["AegisH2"]))
         el.append(Paragraph(
             f"{len(rb.get('plan', []))} step(s) · tested in twin: "
-            f"{'yes' if rb.get('tested_in_twin') else 'no'}", ss["AegisBody"]))
-        for s in rb.get("plan", [])[:12]:
-            el.append(Paragraph("• " + s, ss["AegisMono"]))
+            f"{'yes' if rb.get('tested_in_twin') else 'no — plan only, reversal not executed'}",
+            ss["AegisBody"]))
+        for step in rb.get("plan", [])[:12]:
+            el.append(Paragraph("• " + _esc(redact(step)), ss["AegisMono"]))
 
     # integrity
     ig = bundle["integrity"]
     el.append(Spacer(1, 8))
     el.append(HRFlowable(width="100%", color=_LINE, spaceAfter=4))
     el.append(Paragraph(
-        f"<b>Integrity</b> &nbsp; generated_by {ig['generated_by']} &nbsp;·&nbsp; "
-        f"egress <b>{ig['egress']}</b> &nbsp;·&nbsp; signed "
-        f"{ig.get('signed', False)}", ss["AegisSub"]))
-    el.append(Paragraph(f"sha256 {ig['sha256']}", ss["AegisMono"]))
+        f"<b>Integrity</b> &nbsp; generated_by {_esc(ig['generated_by'])} &nbsp;·&nbsp; "
+        f"egress <b>{_esc(ig['egress'])}</b> &nbsp;·&nbsp; signed "
+        f"{_esc(ig.get('signed', False))}", ss["AegisSub"]))
+    el.append(Paragraph(f"sha256 {_esc(ig['sha256'])}", ss["AegisMono"]))
 
     # bounded-autonomy seal (CROSS-3) — the offline-verifiable receipt, when present
     seal = bundle.get("seal")
