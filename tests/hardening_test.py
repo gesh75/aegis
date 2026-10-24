@@ -17,6 +17,10 @@
       HITL (sealable, needs approval) while router bgp / local-as stay BLOCK
   H12 ledger SIEM anchor: entries arrive over UDP syslog with the chain hashes; a dead
       sink never blocks the append and is counted
+  H13 air-gap is the DEFAULT: unset/typo → on, only "0" opts out; from_env() drops the cloud
+      backend by default even with ANTHROPIC_API_KEY; HttpBackend refuses a non-loopback
+      model URL by default
+  H14 guard-rejected preflights and denied mints are recorded in the ledger
   H10 offline CLI (python -m aegis.verify): genuine seal PASS (exit 0), forged FAIL
       (exit 1), missing seal with --pubkey FAIL, tampered ledger FAIL
 
@@ -421,7 +425,62 @@ def siem_anchor() -> None:
         check("H12.bad_spec_fatal", True)
 
 
+def airgap_default() -> None:
+    from ..core.llm.airgap import airgap_enabled
+    from ..core.llm.config import AdapterConfig
+    from ..core.backends.http_backend import HttpBackend
+    saved = {k: os.environ.get(k) for k in ("AEGIS_AIRGAP", "ANTHROPIC_API_KEY")}
+    try:
+        os.environ.pop("AEGIS_AIRGAP", None)
+        check("H13.default_on", airgap_enabled() is True)
+        os.environ["AEGIS_AIRGAP"] = "no"
+        check("H13.typo_stays_on", airgap_enabled() is True)
+        os.environ["AEGIS_AIRGAP"] = "0"
+        check("H13.explicit_opt_out", airgap_enabled() is False)
+        os.environ.pop("AEGIS_AIRGAP", None)
+        os.environ["ANTHROPIC_API_KEY"] = "test-not-a-real-key"
+        cfg = AdapterConfig.from_env()
+        check("H13.cloud_dropped_by_default",
+              cfg.airgap and all(sp.provider != "anthropic-cloud" for sp in cfg.chain),
+              str([sp.provider for sp in cfg.chain]))
+        try:
+            HttpBackend(model_runner_url="http://10.9.9.9:12434")
+            check("H13.http_backend_refuses_lan_model", False, "accepted")
+        except RuntimeError:
+            check("H13.http_backend_refuses_lan_model", True)
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def rejections_ledgered() -> None:
+    from ..serve import app, _LEDGER
+    c = app.test_client()
+    before = _LEDGER.head()["seq"]
+    r = c.post("/api/preflight/run", json={"intent": "   ", "operator": "eve"})
+    kinds = [e["kind"] for e in _LEDGER.entries()[before:]]
+    check("H14.guard_rejection_ledgered", r.status_code == 400 and "preflight_rejected" in kinds,
+          f"{r.status_code} {kinds}")
+    r = c.post("/api/preflight/run", json=["not", "an", "object"])
+    check("H14.non_object_body_no_500", r.status_code in (400, 200), str(r.status_code))
+    os.environ["AEGIS_APPROVE_KEY"] = KEY
+    os.environ["AEGIS_APPROVER_KEYS"] = "bob:" + hashlib.sha256(b"bob-cred-0000000000").hexdigest()
+    try:
+        before = _LEDGER.head()["seq"]
+        c.post("/api/approve/mint", json={"approver": "bob", "bundle_sha256": "a" * 64})
+        kinds = [e["kind"] for e in _LEDGER.entries()[before:]]
+        check("H14.mint_denial_ledgered", "approval_mint_denied" in kinds, str(kinds))
+    finally:
+        os.environ.pop("AEGIS_APPROVE_KEY", None)
+        os.environ.pop("AEGIS_APPROVER_KEYS", None)
+
+
 def main() -> int:
+    airgap_default()
+    rejections_ledgered()
     siem_anchor()
     peer_as_policy()
     offline_cli()

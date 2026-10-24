@@ -272,34 +272,48 @@ def ledger_verify():
                     **_LEDGER.head()}), (200 if ok else 409)
 
 
+def _reject_run(body: dict, code: int):
+    """Every rejected preflight attempt is a decision too: record it in the ledger (A5).
+    Only the stage + reason are logged — never the submitted configs or intents."""
+    data = request.get_json(silent=True)
+    data = data if isinstance(data, dict) else {}
+    _LEDGER.append("preflight_rejected", stage=body.get("stage", "guard"), http_status=code,
+                   reason=str(body.get("error", ""))[:300],
+                   operator=str(data.get("operator") or "")[:128] or None,
+                   change_ref=str(data.get("change_ref") or "")[:64] or None)
+    return jsonify(body), code
+
+
 @app.post("/api/preflight/run")
 def preflight_run():
     denied = _guard_api()
     if denied:
         return denied
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return _reject_run({"error": "request body must be a JSON object", "stage": "guard"}, 400)
     if (data.get("mode") or "sim") == "live":
-        return jsonify({"error": "live mode is not available in the community tier",
-                        "stage": "guard", "mode": "live"}), 501
+        return _reject_run({"error": "live mode is not available in the community tier",
+                        "stage": "guard", "mode": "live"}, 501)
 
     change_ref = (str(data.get("change_ref") or "")).strip() or None
     if change_ref and not runtime.valid_change_ref(change_ref):
-        return jsonify({"error": "change_ref does not match AEGIS_CHANGE_REF_PATTERN "
-                                 "(e.g. CHG0012345)", "stage": "guard"}), 400
+        return _reject_run({"error": "change_ref does not match AEGIS_CHANGE_REF_PATTERN "
+                                 "(e.g. CHG0012345)", "stage": "guard"}, 400)
     if runtime.is_production():
         if not change_ref:
-            return jsonify({"error": "production mode requires change_ref (ITSM change "
-                                     "number) on every preflight run", "stage": "guard"}), 400
+            return _reject_run({"error": "production mode requires change_ref (ITSM change "
+                                     "number) on every preflight run", "stage": "guard"}, 400)
         if data.get("approver"):
-            return jsonify({"error": "production mode: approval is granted at promotion "
+            return _reject_run({"error": "production mode: approval is granted at promotion "
                                      "with an HMAC token, not asserted at preflight",
-                            "stage": "guard"}), 400
+                            "stage": "guard"}, 400)
 
     try:
         req_intents = parse_intents(data["intents"]) if data.get("intents") else []
         intents = parse_intents(_BASELINE_INTENTS + req_intents)  # re-validate: dup ids
     except IntentSpecError as e:
-        return jsonify({"error": f"intents: {e}", "stage": "guard"}), 400
+        return _reject_run({"error": f"intents: {e}", "stage": "guard"}, 400)
 
     source = (data.get("source") or "nl_intent").strip()
     imported = None
@@ -311,8 +325,8 @@ def preflight_run():
                          "vendor": data.get("vendor") or "frr",
                          "config": data["config"]}]
         else:
-            return jsonify({"error": "config_import requires 'config' or 'configs'",
-                            "stage": "guard"}), 400
+            return _reject_run({"error": "config_import requires 'config' or 'configs'",
+                            "stage": "guard"}, 400)
     try:
         bundle = run_preflight(
             (data.get("intent") or "").strip(), backend=SimulatorBackend(),
@@ -324,10 +338,10 @@ def preflight_run():
             intents=intents or None)
     except PreflightError as e:
         _inc("aegis_preflight_runs_total", decision="guard_rejected")
-        return jsonify({"error": str(e), "stage": "guard"}), 400
+        return _reject_run({"error": str(e), "stage": "guard"}, 400)
     except Exception as e:  # noqa: BLE001
         _inc("aegis_preflight_runs_total", decision="pipeline_error")
-        return jsonify({"error": _client_error(e), "stage": "pipeline"}), 502
+        return _reject_run({"error": _client_error(e), "stage": "pipeline"}, 502)
     # CROSS-3: emit the bounded-autonomy seal in the same response (None if the change is
     # not within the autonomy ceiling -- see change.authority for why). Detached: the seal
     # rides under bundle["seal"] but is excluded from the bundle's own integrity hash.
@@ -432,6 +446,7 @@ def approve_mint():
         resolved = approvers.resolve(request.headers.get("X-Aegis-Approver-Key"))
         if resolved is None:
             _inc("aegis_approval_mint_total", result="unauthorized")
+            _LEDGER.append("approval_mint_denied", reason="missing or unknown approver credential")
             return jsonify({"error": "approver credential required — send "
                                      "X-Aegis-Approver-Key"}), 401
         if who and who.strip() != resolved:
@@ -447,6 +462,8 @@ def approve_mint():
         op = str(bundle.get("operator") or "").strip().lower()
         if op and op == str(who).strip().lower():
             _inc("aegis_approval_mint_total", result="sod_denied")
+            _LEDGER.append("approval_mint_denied", run_id=bundle.get("run_id"),
+                           approver=str(who).strip(), reason="separation of duties")
             return jsonify({"error": "separation of duties: the change's operator cannot "
                                      "approve it"}), 403
     try:

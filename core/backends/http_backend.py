@@ -195,6 +195,11 @@ class HttpBackend:
             # B310: urlopen also accepts file:// and custom schemes; only http(s) is legit
             if urllib.parse.urlsplit(url).scheme not in ("http", "https"):
                 raise ValueError(f"HttpBackend URL must be http(s): {url!r}")
+        # generate_config posts to the model runner directly (not via core/llm), so the
+        # air-gap invariant is enforced here too: default-on, loopback-only model URL.
+        from ..llm.airgap import airgap_enabled, assert_airgap_ok
+        if airgap_enabled():
+            assert_airgap_ok("openai-compatible-local", model_runner_url)
         self.base = base_url.rstrip("/")
         self.model_runner = model_runner_url.rstrip("/")
         self.model = model

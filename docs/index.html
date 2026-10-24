@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AEGIS — Air-gapped Evidence-Grade Inspection System</title>
-  <meta name="description" content="AEGIS preflights network changes against a real containerlab digital twin entirely inside an air-gapped perimeter, then emits a tamper-evident, framework-mapped, examiner-ready evidence bundle. No cloud. No data egress. Ever.">
+  <meta name="description" content="AEGIS preflights network changes against a digital twin (containerlab in the live tier, a simulator in the community tier) inside an air-gapped perimeter, then emits offline-verifiable, framework-mapped evidence. Air-gapped by default.">
   <meta name="color-scheme" content="dark">
   <style>
     :root {
@@ -696,7 +696,7 @@
         </div>
         <h1 class="hero-title">AEGIS</h1>
         <p class="hero-tagline reveal">Air-gapped Evidence-Grade Inspection System — preflight network changes against a real digital twin, entirely inside your perimeter.</p>
-        <p class="hero-sub reveal">No cloud. No data egress. Ever. A self-hosted LLM proposes config inside the wall; the twin verifies; a human authorizes; only a sealed compliance badge leaves.</p>
+        <p class="hero-sub reveal">Air-gapped by default: no cloud backend unless an operator explicitly opts out. A self-hosted LLM proposes config inside the wall; the twin verifies; a human authorizes; only a sealed compliance badge leaves.</p>
 
         <div class="stat-row" role="list" aria-label="Project statistics">
           <div class="stat-chip reveal" role="listitem"><span class="num" data-count="25000" data-suffix="">0</span><span class="lbl">invariant runs</span></div>
@@ -721,7 +721,7 @@
       <h2 class="section-title reveal" id="overview-h">The evidence and governance layer for network change</h2>
       <div class="overview-wrap">
         <div class="overview-body reveal">
-          <p>AEGIS is a self-hosted Python tool that <strong>preflights network changes against a real containerlab digital twin</strong> entirely inside an air-gapped perimeter, then emits a tamper-evident, framework-mapped, examiner-ready evidence bundle.</p>
+          <p>AEGIS is a self-hosted Python tool that <strong>preflights network changes against a digital twin</strong> entirely inside an air-gapped perimeter: a real containerlab topology in the live tier, and a deterministic simulator in the open community tier. It then emits a tamper-evident, framework-mapped, examiner-ready evidence bundle.</p>
           <p>Assurance platforms such as <strong>Forward</strong>, <strong>IP Fabric</strong> and <strong>NetBrain</strong> model the network more deeply, and several now deploy on-prem. AEGIS complements them. It is open source, and it produces evidence an auditor can verify <strong>offline with a public key</strong>: separation of duties, single-use approvals, and a sealed record of which AI model proposed each change and that its autonomy was bounded.</p>
           <p>It runs a <strong>guarded-agentic loop</strong> — a self-hosted LLM proposes config and every step afterward is deterministic verification — so the LLM proposes inside the wall, the twin verifies, a human authorizes, and only a sealed compliance badge ever leaves.</p>
         </div>

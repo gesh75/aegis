@@ -12,7 +12,7 @@ Companion pages: [ARCHITECTURE.md](ARCHITECTURE.md) (maps) · [GO_LIVE.md](GO_LI
 
 | Variable | Where | Effect |
 |---|---|---|
-| `AEGIS_AIRGAP=1` | `core/llm/config.py`, `airgap.py`, backends | Drop `anthropic-cloud` from the chain; refuse non-loopback URLs at construction; abort if `anthropic` is already in `sys.modules`. |
+| `AEGIS_AIRGAP` (**default on**; only `0` opts out) | `core/llm/airgap.py:airgap_enabled`, `config.py`, backends, `HttpBackend` | Drop `anthropic-cloud` from the chain; refuse non-loopback model URLs at construction (also in `HttpBackend.generate_config`); abort if `anthropic` is already in `sys.modules`. A missing or mistyped value stays air-gapped. |
 | `AEGIS_LLM_URL` | `AdapterConfig.from_env` | Local OpenAI-compat base. Default `http://localhost:11434`. Fallback: `MODEL_RUNNER_URL`. |
 | `AEGIS_LLM_MODEL` | same | Default `ai/qwen3:latest`. |
 | `AEGIS_LLM_WEIGHTS` | same | Optional path; hashed once (path, mtime, size cache) into `weights-sha256`. Missing file → honest `identity-claim`, not a crash. |

@@ -35,8 +35,9 @@ into CI and adds a fail-closed production mode.
 mature network assurance platforms. AEGIS cannot out-model them, and it should not try.
 
 AEGIS's original pitch, "the air-gapped answer to cloud-only Forward/NetPilot", **no longer
-holds by itself**. Forward Enterprise deploys on-prem, Forward Predict went GA on
-2026-09-29, and NetPilot now sells an air-gapped option.
+holds by itself**. Forward Enterprise documents on-prem deployment (whether Predict has
+on-prem parity is **Unknown**), Forward Predict went GA on 2026-09-29, and NetPilot
+*claims* an air-gapped option (vendor claim only; its own pricing page conflicts).
 
 The defensible niche is the **independent evidence and governance layer** for network
 change, including changes proposed by AI agents. It combines:
@@ -151,7 +152,7 @@ The older launch posts, blog and video still carry the claim and are flagged for
 
 | Product | Category | How it predicts or checks a change | Deployment | AI / agent features | Notable 2025–26 | Confidence |
 |---|---|---|---|---|---|---|
-| **Forward Enterprise + Predict** (Forward) | Network digital twin and assurance | **Mathematical model** of the network. Predict traces control-plane changes into the data plane and runs packet-path analysis on the predicted snapshot. | On-prem or SaaS | Forward AI: agentic, multi-step plans reaching the twin and systems such as ServiceNow (announced 2026-01-29, GA Apr 2026). Predict exposed as MCP/REST tools. | Predict GA 2026-09-29, with beta customers in financial services (IG Group named) | Confirmed (vendor and press) |
+| **Forward Enterprise + Predict** (Forward) | Network digital twin and assurance | **Mathematical model** of the network. Predict traces control-plane changes into the data plane and runs packet-path analysis on the predicted snapshot. | Enterprise: on-prem or SaaS (Confirmed). **Predict on-prem availability and parity: Unknown.** | Forward AI: agentic, multi-step plans reaching the twin and systems such as ServiceNow (announced 2026-01-29, GA Apr 2026). Predict exposed as MCP/REST tools. | Predict GA 2026-09-29, with beta customers in financial services (IG Group named) | Confirmed (vendor and press) |
 | **IP Fabric** | Network assurance, discovered-state twin | Read-only discovery. Compares actual state with intended state, using "100+" built-in checks plus custom ones. | Appliance (on-prem) | MCP server built into appliances (v6.0+) | v8.1 (Sep 2026): application awareness and a cloud-native model. NetBox integration for continuous validation (May 2026). | Confirmed (vendor and newswire) |
 | **NetBrain** | Network automation and assurance | Change runbooks tagged pre-change / post-change, with automatic before and after pairing. Codified "intents" for validation and drift. | Inferred commercial on-prem/SaaS (not sourced) | Planned "Change Agent" (natural language to governed runbook) is on the **Q4 2026 roadmap**, not shipping | ServiceNow and Jira integrations | Confirmed (vendor) |
 | **Batfish** | Open-source config analysis | **Static** analysis of planned or current configs (no emulation) | Self-hosted container; Apache-2.0 | None | AWS-managed open source since 2022 (licensing deal). Batfish Enterprise status is Conflicting. | Confirmed (batfish.org, GeekWire) |
@@ -219,7 +220,7 @@ Legend: ● Confirmed by a cited source · ◑ Inferred (well known, not cited h
 | V3 | **AI accountability**: which model proposed the change, and that its autonomy was bounded, sealed per change | Every vendor is shipping agentic change (Forward AI, Predict MCP, NetBrain Change Agent, NetPilot). AEGIS can be the **independent guardrail and evidence layer** in front of any of them. | `core/llm/identity.py`, `core/risk/authority.py` |
 | V4 | **Per-change multi-framework crosswalk** with honesty labels, plus OSCAL and CAB exports | One run produces PCI, HIPAA, NIST and CIS evidence rows | `evidence/frameworks/*` |
 | V5 | **Open source, no licence cost, inspectable rules** | InfoSec can read the exact gate logic. There's no vendor-viability risk of the Skybox kind. | Apache-2.0 |
-| V6 | **Vendor-neutral complement** | It can ingest Batfish, IP Fabric or Forward results as evidence inputs instead of competing with them | Backend protocol (`core/backends/base.py`) |
+| V6 | **Vendor-neutral complement** | Batfish is integrated today (`core/intents/`, the oracle seam). Ingesting IP Fabric or Forward results as evidence inputs is **proposed, not built**: it would be a new `IntentOracle` implementation per vendor. | `core/intents/engine.py` (`IntentOracle` protocol) |
 
 ### 3.6 Market signals
 

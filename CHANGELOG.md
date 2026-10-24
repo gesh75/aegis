@@ -5,6 +5,21 @@ versioning is [SemVer](https://semver.org).
 
 ## [Unreleased]
 
+### Security: review findings on PR #40
+- **Air-gap is now the default (high).** The cloud fallback and non-loopback model URLs used
+  to be allowed unless `AEGIS_AIRGAP=1` was set. Now only an explicit `AEGIS_AIRGAP=0` opts
+  out, and a missing or mistyped value stays air-gapped. `HttpBackend.generate_config`,
+  which calls the model runner directly, now enforces the same loopback check.
+- **Rejected preflights are ledgered.** Every guard and pipeline rejection appends
+  `preflight_rejected` (stage and reason only, never the configs). Denied mints append
+  `approval_mint_denied`. A non-object JSON body is a 400, not a 500.
+- Docs qualified:
+  - the twin is containerlab in the live tier and a simulator in the community tier;
+  - the OSCAL export is "AEGIS-shaped, not schema-validated";
+  - Forward's on-prem deployment applies to Enterprise, and Predict's parity is unknown;
+  - NetPilot's air-gap option is a vendor claim;
+  - ingesting IP Fabric or Forward results is proposed, not built.
+
 ### Intent checks via Batfish: reachability, ACL, BGP, references (bundle v1.4)
 Closes the biggest gap from the strategy doc, G1 (reachability and ACL analysis).
 
@@ -35,8 +50,9 @@ Closes the biggest gap from the strategy doc, G1 (reachability and ACL analysis)
   advantages, market signals, a recommendation (AEGIS + Batfish pilot) and RFP questions.
   Every claim carries a Confirmed / Inferred / Unknown label.
 - **Positioning corrected.** README and Pages no longer say Forward and NetPilot are
-  "cloud-by-architecture". Forward Enterprise documents on-prem deployment, Forward Predict
-  went GA on 2026-09-29, and NetPilot offers an air-gapped option. AEGIS is now positioned as
+  "cloud-by-architecture". Forward Enterprise documents on-prem deployment (Predict's
+  on-prem parity is unknown), Forward Predict went GA on 2026-09-29, and NetPilot *claims*
+  an air-gapped option (vendor claim, partly contradicted by its pricing page). AEGIS is now positioned as
   the open-source, offline-verifiable evidence and governance layer.
   `docs/PHASES.md` is annotated, not rewritten. The older launch copy is flagged in the
   strategy doc (§8).
