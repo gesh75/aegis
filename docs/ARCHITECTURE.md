@@ -326,7 +326,7 @@ are therefore never promotable under a valid ceiling.
 |---|---|
 | **Language** | Python 3.10+ (pure stdlib core, backend-agnostic via `typing.Protocol`) |
 | **Orchestration** | Deterministic pipeline · dataclasses · frozen dataclasses (promote) |
-| **AI (only step)** | Self-hosted Qwen3 / Ollama via `core/llm` (OpenAI-compat local; cloud dropped when `AEGIS_AIRGAP=1`) |
+| **AI (only step)** | Self-hosted Qwen3 / Ollama via `core/llm` (OpenAI-compat local; cloud dropped by default; only `AEGIS_AIRGAP=0` re-enables it) |
 | **Twin** | containerlab + Docker (srlinux / ceos / frr / junos / ios / panos) |
 | **Static analysis** | Batfish-style check via DCN_Network_Tool `:5757` |
 | **Evidence** | `hashlib` sha256 seal · canonical JSON · JSON Schema draft-07 · `jsonschema` 3.2.0 |
@@ -349,7 +349,7 @@ Every model call is supposed to leave the process through `core/llm/` (`LLMEgres
 OpenAI-compatible runner; the adapter is the path that enforces the air-gap construction
 checks.
 
-When `AEGIS_AIRGAP=1`:
+In air-gap mode (the default; only `AEGIS_AIRGAP=0` opts out):
 
 1. `anthropic-cloud` is dropped from the fallback chain **and** refused at backend
    construction.

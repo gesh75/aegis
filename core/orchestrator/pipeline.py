@@ -1,7 +1,8 @@
 """AEGIS deterministic preflight pipeline.
 
-intent -> guard -> generate(LLM) -> batfish -> spawn twin -> apply+converge
-       -> diff -> compliance map -> risk tier -> rollback -> verdict -> evidence bundle
+intent -> guard -> generate(LLM) -> batfish -> intent checks (optional) -> spawn twin
+       -> apply+converge -> diff -> compliance map -> risk tier -> rollback -> verdict
+       -> evidence bundle
 
 The only non-deterministic / AI step is generate_config (inside the backend). Every
 step after it is verification. The twin is ALWAYS torn down (finally). The result is a
@@ -15,6 +16,7 @@ from ..backends.base import Backend, GeneratedConfig
 from . import guards, rollback
 from ...evidence.bundler import build_bundle, unattested_identity
 from ..risk import authority_record, classify_change, load_max_authorized, unify_severity
+from ..intents.runner import run_intents
 from ...evidence.compliance import map_controls
 
 
@@ -29,7 +31,9 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
                   approver: str | None = None,
                   imported_configs: list[dict] | None = None,
                   model_identity: dict | None = None,
-                  change_ref: str | None = None) -> dict:
+                  change_ref: str | None = None,
+                  intents: list[dict] | None = None,
+                  intent_runner=None) -> dict:
     frameworks = frameworks or ["pci_dss_v4"]
     run_id = uuid.uuid4().hex
     created = datetime.now(timezone.utc).isoformat()
@@ -63,6 +67,16 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
         # 3. static analysis ----------------------------------------------
         bf = backend.batfish_check(configs)
 
+        # 3b. intent checks (reachability / ACL / BGP / references) ---------
+        #     Before/after differential against the reference snapshot. A failed OR
+        #     un-evaluable intent counts as a verification error (fail closed).
+        intent_record = None
+        if intents:
+            intent_record = (intent_runner or run_intents)(intents, configs)
+        intent_problems = (intent_record["failed"] + intent_record["errors"]
+                           if intent_record else 0)
+        verify_errors = bf["errors"] + intent_problems
+
         # 4. spawn throwaway twin -----------------------------------------
         twin_id = backend.spawn_twin(lab)
 
@@ -78,7 +92,7 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
 
         # 8. risk tier ----------------------------------------------------
         tier = guards.risk_tier(
-            batfish_errors=bf["errors"],
+            batfish_errors=verify_errors,
             devices_affected=diff["devices_affected"],
             sessions_dropped=len(diff["sessions_dropped"]),
             converged=twin["converged"],
@@ -91,7 +105,7 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
 
         # 10. verdict -----------------------------------------------------
         decision, reason = _verdict(bf, twin, tier, needs_approval,
-                                    approval_granted)
+                                    approval_granted, intent_record)
 
         # seal WHICH model produced the change (#4 wedge). config_import is operator-
         # supplied (no model) -> None -> build_bundle seals the honest _UNKNOWN_IDENTITY.
@@ -109,7 +123,7 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
         # authority tier (#5): orthogonal to risk_tier -- a twin-clean LOW-severity change
         # to a fabric-identity construct (AS/RD/RT) is still BLOCK. Sealed + enforced at G5.
         authority = authority_record(
-            unify_severity(batfish_errors=bf["errors"],
+            unify_severity(batfish_errors=verify_errors,
                            devices_affected=diff["devices_affected"],
                            sessions_dropped=len(diff["sessions_dropped"]),
                            converged=twin["converged"]),
@@ -125,15 +139,23 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
             approval_utc=created if approval_granted else None,
             rollback_plan=plan, decision=decision, reason=reason,
             model_identity=mi, authority=authority, change_ref=change_ref,
+            intents=intent_record, verify_errors=verify_errors,
         )
     finally:
         if twin_id is not None:
             backend.teardown_twin(twin_id)
 
 
-def _verdict(bf, twin, tier, needs_approval, approval_granted):
+def _verdict(bf, twin, tier, needs_approval, approval_granted, intent_record=None):
     if bf["errors"] > 0:
         return "blocked", f"static analysis found {bf['errors']} error(s)"
+    if intent_record and (intent_record["failed"] or intent_record["errors"]):
+        bad = [r["id"] for r in intent_record["results"] if r["status"] != "pass"]
+        reg = intent_record.get("regressions") or 0
+        return "blocked", (f"intent check: {intent_record['failed']} failed, "
+                           f"{intent_record['errors']} not evaluable"
+                           + (f", {reg} regression(s) vs reference" if reg else "")
+                           + f" ({', '.join(bad[:5])}{'…' if len(bad) > 5 else ''})")
     if not twin["converged"]:
         return "blocked", "twin failed to converge after change"
     if twin["bgp_after"] < twin["bgp_before"]:

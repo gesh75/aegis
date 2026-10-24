@@ -63,7 +63,7 @@ def _local_identity_dict() -> dict:
 
 def test_nl_intent_seals_simulator_identity_v11() -> None:
     b = _bundle()
-    assert b["bundle_version"] in ("1.2", "1.3")
+    assert b["bundle_version"] in ("1.2", "1.3", "1.4")
     mi = b["change"]["model_identity"]
     assert mi["provider"] == "simulator" and mi["model"] == "deterministic-sim-v1"
     assert verify(b)

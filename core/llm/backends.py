@@ -119,7 +119,7 @@ def _retry_after_seconds(resp: httpx.Response) -> float | None:
 class OpenAICompatLocalBackend:
     """POST {base}/v1/chat/completions — the universal local contract.
 
-    Construction runs the air-gap pre-check (loopback enforced when AEGIS_AIRGAP=1).
+    Construction runs the air-gap pre-check (loopback enforced unless AEGIS_AIRGAP=0).
     """
 
     provider: Provider = "openai-compatible-local"
@@ -130,9 +130,9 @@ class OpenAICompatLocalBackend:
         timeout_s: float = 60.0,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
-        from .airgap import assert_airgap_ok
+        from .airgap import airgap_enabled, assert_airgap_ok
 
-        if os.environ.get("AEGIS_AIRGAP", "") == "1":
+        if airgap_enabled():
             assert_airgap_ok(self.provider, spec.base_url)
         self._spec = spec
         self._timeout_s = timeout_s
@@ -207,10 +207,10 @@ class AnthropicCloudBackend:
         timeout_s: float = 60.0,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
-        from .airgap import assert_airgap_ok
+        from .airgap import airgap_enabled, assert_airgap_ok
 
         # In air-gap mode this RAISES — the cloud backend must never construct.
-        if os.environ.get("AEGIS_AIRGAP", "") == "1":
+        if airgap_enabled():
             assert_airgap_ok(self.provider, spec.base_url)
         self._spec = spec
         self._timeout_s = timeout_s

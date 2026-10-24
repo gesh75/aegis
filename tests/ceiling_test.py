@@ -50,7 +50,7 @@ def _reseal(b: dict) -> dict:
 
 def test_bundle_carries_sealed_authority_v12() -> None:
     b = _b("add vlan 10 to leaf-1")
-    assert b["bundle_version"] in ("1.2", "1.3")
+    assert b["bundle_version"] in ("1.2", "1.3", "1.4")
     a = b["change"]["authority"]
     assert set(a) == {"severity", "required", "max_authorized", "allowed", "effective", "change_class"}
     assert a["required"] in ("auto", "hitl", "hotl", "block")

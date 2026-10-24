@@ -21,6 +21,7 @@ is exactly what air-gap mode forbids.
 """
 from __future__ import annotations
 
+import os
 import sys
 from ipaddress import ip_address
 from urllib.parse import urlparse
@@ -53,6 +54,13 @@ def is_loopback(url: str) -> bool:
         return False
 
 
+def airgap_enabled() -> bool:
+    """Air-gap is the DEFAULT. Only an explicit ``AEGIS_AIRGAP=0`` enables the cloud
+    fallback and non-loopback model URLs. A missing or mistyped value fails closed (stays
+    air-gapped), so "inside the perimeter" holds unless an operator deliberately opts out."""
+    return os.environ.get("AEGIS_AIRGAP", "1").strip() != "0"
+
+
 def assert_airgap_ok(provider: str, base_url: str) -> None:
     """HARD invariant — raises RuntimeError BEFORE any socket opens.
 
@@ -63,13 +71,13 @@ def assert_airgap_ok(provider: str, base_url: str) -> None:
     """
     if provider == _CLOUD_PROVIDER:
         raise RuntimeError(
-            "AEGIS_AIRGAP=1: cloud backend (anthropic-cloud) is forbidden in air-gap mode"
+            "air-gap (default; AEGIS_AIRGAP=0 opts out): cloud backend (anthropic-cloud) is forbidden"
         )
     if not is_loopback(base_url):
-        raise RuntimeError(f"AEGIS_AIRGAP=1: non-loopback egress forbidden: {base_url!r}")
+        raise RuntimeError(f"air-gap (default; AEGIS_AIRGAP=0 opts out): non-loopback egress forbidden: {base_url!r}")
     if "anthropic" in sys.modules:
         raise RuntimeError(
-            "AEGIS_AIRGAP=1: the anthropic SDK is loaded in-process — aborting "
+            "air-gap (default): the anthropic SDK is loaded in-process — aborting "
             "(in-process exposure violates the air-gap trust surface)"
         )
 

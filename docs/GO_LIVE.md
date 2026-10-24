@@ -36,8 +36,9 @@ AEGIS live mode is fully env-driven. Set what applies, then (re)start the server
 # LLM (defaults already match a stock Ollama + gemma4)
 export AEGIS_LLM_URL=http://localhost:11434       # OpenAI-compat /v1
 export AEGIS_LLM_MODEL=gemma4:latest
-# Air-gap: refuse cloud + any non-loopback URL (including host.local / mDNS)
-# export AEGIS_AIRGAP=1
+# Air-gap is ON by default: cloud + any non-loopback model URL (including host.local / mDNS)
+# is refused. Only an explicit opt-out enables them (not recommended):
+# export AEGIS_AIRGAP=0
 # Optional: sha256 the served weights into change.model_identity
 # export AEGIS_LLM_WEIGHTS=/path/to/model.gguf
 
@@ -122,7 +123,7 @@ unique name + mgmt network + `10.x` subnet, so it never collides. It is destroye
 |---|---|---|
 | `stage: guard` | empty/oversized/injection intent, or config_import with no config | fix the input |
 | `502 … URLError` | LLM endpoint unreachable | check `AEGIS_LLM_URL`, §0 curl |
-| `AEGIS_AIRGAP=1: non-loopback egress forbidden` | LLM URL is not loopback | use `http://127.0.0.1:…` or `http://localhost:…` — not a LAN IP, not `*.local` |
+| `air-gap (default; AEGIS_AIRGAP=0 opts out): non-loopback egress forbidden` | LLM URL is not loopback | use `http://127.0.0.1:…` or `http://localhost:…` — not a LAN IP, not `*.local` |
 | `generation_failed` | LLM returned non-JSON, a non-object, or empty/blank `configs` | fix the model / prompt; AEGIS will **not** synthesize a passing stub |
 | Idle BGP still `ok` but not `ship_ready` | command ran; no Established peer rows | expected fail-closed — `status==ok` is not a session |
 | `AEGIS_SEAL_KEY invalid … refusing to start` | pinned seal key is not 64 hex | unset for demo, or supply a valid seed |

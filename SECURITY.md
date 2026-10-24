@@ -11,7 +11,7 @@ within 3 business days.
 
 | Claim | Backed by | Not claimed |
 |---|---|---|
-| Nothing leaves the perimeter | `integrity.egress: "none"`, air-gap overlay (`network_mode: none`), loopback-only LLM URLs | That *your* host has no other egress path |
+| Nothing leaves the perimeter | `integrity.egress: "none"`, air-gap overlay (`network_mode: none`), **air-gap on by default** (no cloud backend, loopback-only model URLs unless `AEGIS_AIRGAP=0`) | That *your* host has no other egress path; or that an operator who sets `AEGIS_AIRGAP=0` stays inside the perimeter |
 | Bundle content is self-consistent | `integrity.sha256` (`evidence/bundler.py`) | Origin — anyone can recompute a sha256 |
 | Bundle came from **this** AEGIS and was bounded | detached Ed25519 seal, `verify_seal` G0–G6, offline `python -m aegis.verify` | Hardware-backed key (PIV signer is planned, `docs/PIV_HARDWARE_SIGNER_PLAN.md`) |
 | A second person approved | HMAC v2 token + `AEGIS_APPROVER_KEYS` identity + SoD (approver ≠ operator) | SSO/MFA identity (planned: Entra ID / OIDC) |

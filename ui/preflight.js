@@ -166,10 +166,34 @@ function render(b){
       'style="background:transparent;border:1px solid var(--acc);color:var(--acc);'+
       'font-weight:600">⬇ Download evidence PDF</button></div>';
 
+  renderIntents(b.validation.intents);
+
   document.getElementById('foot').innerHTML=
     'run '+h(b.run_id)+' · '+h(b.created_utc)+' · generated_by '+h(b.integrity.generated_by)+
     ' · egress '+h(b.integrity.egress)+'<br>sha256 '+h(b.integrity.sha256);
 }
+// v1.4 intent checks: before → after per intent; error is shown as a failure, never a pass.
+// Built with DOM nodes + textContent (no HTML strings), so no intent field can become markup.
+function renderIntents(ir){
+  if(!ir) return;
+  const el=(tag,cls,text)=>{const n=document.createElement(tag);
+    if(cls) n.className=cls; if(text!=null) n.textContent=String(text); return n;};
+  const wrap=el('div');
+  const kv=el('div','kv');
+  kv.append(el('span',null,'intents ('+ir.engine+')'),
+            el('b',null,ir.failed+' fail · '+ir.errors+' n/e · '+ir.regressions+' regression'));
+  const chips=el('div','intent-chips');
+  (ir.results||[]).forEach(r=>{
+    const c=el('span','chip '+(r.status==='pass'?'pass':'fail'),
+      r.id+' · '+(r.before||'—')+'→'+r.status+(r.regression?' ⚠':''));
+    c.title=String(r.evidence||'');
+    chips.append(c);
+  });
+  wrap.append(kv,chips);
+  const card=document.getElementById('c-evidence');
+  card.insertBefore(wrap, card.querySelector('.dev'));
+}
+
 // Escape every HTML-significant char so server/LLM-derived values can never break
 // out of the markup they are injected into. h() coerces null/number/etc. to a string
 // first so callers can pass any field value straight through.

@@ -7,7 +7,8 @@ DROPPED from the chain entirely in air-gap mode (defense in depth — also refus
 construction by airgap.py).
 
 Env vars read:
-  AEGIS_AIRGAP        "1" => air-gap mode (drop cloud, refuse non-loopback)
+  AEGIS_AIRGAP        air-gap is the DEFAULT; only "0" opts out (enables cloud fallback and
+                      non-loopback model URLs)
   AEGIS_LLM_URL       local OpenAI-compat base (default http://localhost:11434)
   AEGIS_LLM_MODEL     local model id          (default ai/qwen3:latest)
   AEGIS_LLM_WEIGHTS   path to local weights file for sha256 attestation (optional)
@@ -69,7 +70,8 @@ class AdapterConfig:
         In air-gap mode the anthropic-cloud spec is DROPPED from the chain here (defense
         in depth) and ALSO refused at construction by airgap.assert_airgap_ok().
         """
-        airgap = os.environ.get("AEGIS_AIRGAP", "") == "1"
+        from .airgap import airgap_enabled
+        airgap = airgap_enabled()
 
         local_url = (
             os.environ.get("AEGIS_LLM_URL")

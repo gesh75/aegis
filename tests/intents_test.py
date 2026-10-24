@@ -1,0 +1,307 @@
+"""Intent engine contract — pure, no Batfish (a fixture oracle answers).
+
+  I1  spec: valid docs normalize; unknown kind/field, bad IP/port/id, dup id → IntentSpecError
+  I2  reachability deny: any SUCCESS flow → fail (examples cited); none → pass
+  I3  reachability allow: any FAILURE flow → fail; no SUCCESS at all → error (vacuous)
+  I4  bgp / undefined refs / dead ACL lines: fail with examples, pass when clean
+  I5  fidelity gate: a FAILED-to-parse candidate turns every intent into error
+  I6  differential: pass→fail is flagged regression; before is recorded
+  I7  fail closed: no engine → every intent error; oracle exceptions → error rows
+  I8  snapshot materialization: junos set-merge, replace, new; reference untouched
+  I9  pipeline: a failing/unevaluable intent blocks the verdict, bundle is schema-valid
+      v1.4 and integrity-verifies; no intents → validation.intents is null
+  I10 runner without AEGIS_BATFISH_HOST fails closed (never "skipped")
+  I11 HTTP: bad intents → 400; valid intents without an engine → blocked bundle; status +
+      metrics report the engine; PDF/CAB render the intent rows
+
+Usage:  python3 -m aegis.tests.intents_test
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+
+from ..core.intents import IntentSpecError, OracleError, check_intents, parse_intents
+from ..core.intents.runner import run_intents
+from ..core.intents.snapshot import materialize
+from ..core.orchestrator.pipeline import run_preflight
+from ..core.backends.simulator import SimulatorBackend
+from ..evidence.bundler import verify
+
+FAILS: list[str] = []
+CHECKS = 0
+_SCHEMA = os.path.join(os.path.dirname(__file__), "..", "evidence", "schema",
+                       "evidence_bundle.schema.json")
+
+
+def check(name: str, cond: bool, detail: str = "") -> None:
+    global CHECKS
+    CHECKS += 1
+    if not cond:
+        FAILS.append(f"{name}: {detail}")
+
+
+class Fixture:
+    name = "fixture"
+
+    def __init__(self, *, success=(), failure=(), bgp=(), refs=(), dead=(),
+                 parse=(("configs/r1.cfg", "PASSED"),), boom=False):
+        self.success, self.failure = list(success), list(failure)
+        self.bgp, self.refs, self.dead = list(bgp), list(refs), list(dead)
+        self.parse = [{"file": f, "status": s} for f, s in parse]
+        self.boom = boom
+
+    def parse_status(self):
+        return self.parse
+
+    def reachability(self, *, start, src_ips, dst_ips, protocols, dst_ports, action):
+        if self.boom:
+            raise OracleError("engine down")
+        return self.success if action == "SUCCESS" else self.failure
+
+    def bgp_sessions(self, nodes):
+        return self.bgp
+
+    def undefined_references(self):
+        if self.boom:
+            raise RuntimeError("kaboom")
+        return self.refs
+
+    def unreachable_filter_lines(self, nodes):
+        return self.dead
+
+
+DENY = {"id": "guest-x-cde", "kind": "reachability", "start": "@enter(r1[Gi0/1])",
+        "src_ips": "10.50.0.0/16", "dst_ips": "10.10.0.0/24", "protocols": ["tcp"],
+        "dst_ports": "22", "expect": "deny", "control": "PCI DSS v4.0 1.3.1"}
+ALLOW = {"id": "web-ok", "kind": "reachability", "src_ips": "10.50.0.0/16",
+         "dst_ips": "10.20.0.10", "protocols": ["tcp"], "dst_ports": "443", "expect": "allow"}
+
+
+def spec() -> None:
+    doc = {"intents": [DENY, ALLOW,
+                       {"id": "bgp", "kind": "bgp_sessions", "expect": "all_established"},
+                       {"id": "refs", "kind": "undefined_references", "expect": "none"},
+                       {"id": "acl", "kind": "filter_line_reachability", "expect": "none"}]}
+    got = parse_intents(doc)
+    check("I1.parse_ok", [i["id"] for i in got] == ["guest-x-cde", "web-ok", "bgp", "refs", "acl"])
+    check("I1.protocols_normalized", got[0]["protocols"] == ["tcp"])
+    bad_cases = {
+        "unknown_kind": [{"id": "a", "kind": "pingable", "expect": "none"}],
+        "unknown_field": [dict(DENY, dst_port="22")],
+        "bad_ip": [dict(DENY, dst_ips="10.10.0.300/24")],
+        "bad_port": [dict(DENY, dst_ports="70000")],
+        "bad_expect": [dict(DENY, expect="maybe")],
+        "dup_id": [DENY, DENY],
+        "bad_id": [dict(DENY, id="has space")],
+        "no_source": [{k: v for k, v in DENY.items() if k not in ("start", "src_ips")}],
+        "bad_protocol": [dict(DENY, protocols=["gre"])],
+        "not_list": {"intents": "nope"},
+    }
+    for name, doc in bad_cases.items():
+        try:
+            parse_intents(doc)
+            check(f"I1.reject_{name}", False, "accepted")
+        except IntentSpecError:
+            check(f"I1.reject_{name}", True)
+
+
+def semantics() -> None:
+    ints = parse_intents([DENY])
+    r = check_intents(ints, candidate=Fixture(success=["flow 10.50.1.1->10.10.0.5:22"]),
+                      engine="fixture")
+    check("I2.deny_leak_fails", r["results"][0]["status"] == "fail" and r["failed"] == 1
+          and r["results"][0]["examples"], json.dumps(r["results"][0]))
+    r = check_intents(ints, candidate=Fixture(), engine="fixture")
+    check("I2.deny_clean_passes", r["results"][0]["status"] == "pass", r["results"][0]["evidence"])
+    check("I2.control_carried", r["results"][0].get("control") == "PCI DSS v4.0 1.3.1")
+
+    ints = parse_intents([ALLOW])
+    r = check_intents(ints, candidate=Fixture(success=["ok"], failure=["dropped"]), engine="f")
+    check("I3.allow_partial_fails", r["results"][0]["status"] == "fail")
+    r = check_intents(ints, candidate=Fixture(success=["ok"]), engine="f")
+    check("I3.allow_passes", r["results"][0]["status"] == "pass")
+    r = check_intents(ints, candidate=Fixture(), engine="f")
+    check("I3.vacuous_allow_is_error", r["results"][0]["status"] == "error" and r["errors"] == 1,
+          r["results"][0]["evidence"])
+
+    bgp = parse_intents([{"id": "bgp", "kind": "bgp_sessions", "expect": "all_established"}])
+    r = check_intents(bgp, candidate=Fixture(bgp=[{"node": "r1", "remote": "r2",
+                                                   "status": "ESTABLISHED"},
+                                                  {"node": "r1", "remote": "r3",
+                                                   "status": "NOT_ESTABLISHED"}]), engine="f")
+    check("I4.bgp_down_fails", r["results"][0]["status"] == "fail"
+          and "r3" in r["results"][0]["examples"][0])
+    r = check_intents(bgp, candidate=Fixture(bgp=[{"node": "r1", "remote": "r2",
+                                                   "status": "ESTABLISHED"}]), engine="f")
+    check("I4.bgp_ok", r["results"][0]["status"] == "pass")
+    r = check_intents(bgp, candidate=Fixture(), engine="f")
+    check("I4.bgp_none_is_error", r["results"][0]["status"] == "error")
+    refs = parse_intents([{"id": "refs", "kind": "undefined_references", "expect": "none"}])
+    check("I4.refs_fail", check_intents(refs, candidate=Fixture(refs=["r1: acl MISSING"]),
+                                        engine="f")["results"][0]["status"] == "fail")
+    acl = parse_intents([{"id": "acl", "kind": "filter_line_reachability", "expect": "none"}])
+    check("I4.dead_acl_fail", check_intents(acl, candidate=Fixture(dead=["GUEST_IN: deny tcp"]),
+                                            engine="f")["results"][0]["status"] == "fail")
+
+    both = parse_intents([DENY, ALLOW])
+    r = check_intents(both, candidate=Fixture(parse=(("configs/r1.cfg", "FAILED"),),
+                                              success=["x"]), engine="f")
+    check("I5.fidelity_gate", all(x["status"] == "error" for x in r["results"])
+          and r["fidelity"]["failed"] == 1, json.dumps(r["fidelity"]))
+    r = check_intents(both, candidate=Fixture(parse=()), engine="f")
+    check("I5.empty_snapshot_gate", all(x["status"] == "error" for x in r["results"]))
+
+    r = check_intents(parse_intents([DENY]), reference=Fixture(),
+                      candidate=Fixture(success=["leak"]), engine="f")
+    row = r["results"][0]
+    check("I6.regression", row["before"] == "pass" and row["status"] == "fail"
+          and row.get("regression") is True and r["regressions"] == 1, json.dumps(row))
+    r = check_intents(parse_intents([DENY]), reference=Fixture(success=["leak"]),
+                      candidate=Fixture(success=["leak"]), engine="f")
+    check("I6.preexisting_not_regression", r["regressions"] == 0
+          and r["results"][0]["before"] == "fail")
+
+    r = check_intents(both, candidate=None, unavailable_reason="no host")
+    check("I7.unavailable_all_error", r["errors"] == 2 and r["engine"] == "unavailable"
+          and all(x["status"] == "error" for x in r["results"]))
+    r = check_intents(parse_intents([DENY, {"id": "refs", "kind": "undefined_references",
+                                            "expect": "none"}]),
+                      candidate=Fixture(boom=True), engine="f")
+    check("I7.oracle_exceptions_error", [x["status"] for x in r["results"]] == ["error", "error"],
+          json.dumps(r["results"]))
+
+
+def snapshots() -> None:
+    base = {"mx1": 'system { host-name mx1; }\nprotocols { bgp { group G { neighbor 1.1.1.1; } } }',
+            "r1": "hostname r1\n!\ninterface Gi0/0\n ip address 10.0.0.1 255.255.255.0\n"}
+    cfgs = [{"device": "mx1", "vendor": "junos",
+             "config": 'set protocols bgp group G authentication-key "$9$x"'},
+            {"device": "r1", "vendor": "ios", "config": "hostname r1\n! full replacement\n"},
+            {"device": "new-leaf", "vendor": "junos", "config": "set system host-name new-leaf"}]
+    ref, cand, log = materialize(cfgs, base)
+    modes = {m["device"]: m["mode"] for m in log}
+    check("I8.modes", modes == {"mx1": "junos-set-merge", "r1": "replace", "new-leaf": "new"},
+          str(modes))
+    mx = cand["configs/mx1.cfg"]
+    check("I8.junos_merge", mx.startswith("#RANCID-CONTENT-TYPE: juniper")
+          and "set protocols bgp group G neighbor 1.1.1.1" in mx
+          and mx.rstrip().endswith('authentication-key "$9$x"'), mx)
+    check("I8.replace", cand["configs/r1.cfg"].startswith("hostname r1\n! full"))
+    check("I8.reference_untouched", ref["configs/r1.cfg"] == base["r1"]
+          and "authentication-key" not in ref["configs/mx1.cfg"])
+    check("I8.new_device", "configs/new-leaf.cfg" in cand and "configs/new-leaf.cfg" not in ref)
+    ref2, cand2, _ = materialize([{"device": "../../etc/passwd", "vendor": "ios", "config": "x"}],
+                                 {})
+    check("I8.no_base_no_reference", ref2 is None)
+    check("I8.path_sanitized", all(".." not in k and k.startswith("configs/") for k in cand2),
+          str(list(cand2)))
+
+
+def pipeline() -> None:
+    try:
+        import jsonschema
+        schema = json.load(open(_SCHEMA))
+    except ImportError:
+        jsonschema = None
+    ints = parse_intents([DENY])
+
+    def leak_runner(intents, configs):
+        return check_intents(intents, reference=Fixture(), candidate=Fixture(success=["leak"]),
+                             engine="fixture")
+
+    def clean_runner(intents, configs):
+        return check_intents(intents, reference=Fixture(), candidate=Fixture(), engine="fixture")
+
+    sim = SimulatorBackend(converge_fail_rate=0.0, batfish_error_rate=0.0)
+    b = run_preflight("add vlan 10 to leaf-1", backend=sim, lab="single", operator="ci",
+                      intents=ints, intent_runner=leak_runner)
+    check("I9.leak_blocks", b["verdict"]["decision"] == "blocked"
+          and "intent check" in b["verdict"]["reason"]
+          and "regression" in b["verdict"]["reason"], b["verdict"]["reason"])
+    check("I9.leak_sealed_in_bundle", b["validation"]["intents"]["regressions"] == 1 and verify(b))
+    check("I9.severity_critical", b["validation"]["blast_radius"]["severity"] == "critical")
+    if jsonschema:
+        try:
+            jsonschema.validate(b, schema)
+            check("I9.schema_valid_with_intents", True)
+        except jsonschema.ValidationError as e:
+            check("I9.schema_valid_with_intents", False, e.message)
+    b2 = run_preflight("add vlan 10 to leaf-1", backend=sim, lab="single", operator="ci",
+                       intents=ints, intent_runner=clean_runner)
+    check("I9.clean_not_blocked_by_intents", "intent" not in b2["verdict"]["reason"],
+          b2["verdict"]["reason"])
+    b3 = run_preflight("add vlan 10 to leaf-1", backend=sim, lab="single", operator="ci")
+    check("I9.no_intents_null", b3["validation"]["intents"] is None
+          and b3["bundle_version"] == "1.4")
+    if jsonschema:
+        try:
+            jsonschema.validate(b3, schema)
+            check("I9.schema_valid_without_intents", True)
+        except jsonschema.ValidationError as e:
+            check("I9.schema_valid_without_intents", False, e.message)
+
+    saved = os.environ.pop("AEGIS_BATFISH_HOST", None)
+    try:
+        r = run_intents(ints, [])
+        check("I10.no_host_fails_closed", r["errors"] == 1 and r["engine"] == "unavailable"
+              and "AEGIS_BATFISH_HOST" in r["results"][0]["evidence"], json.dumps(r))
+        b4 = run_preflight("add vlan 10 to leaf-1", backend=sim, lab="single", operator="ci",
+                           intents=ints)
+        check("I10.pipeline_blocks_without_engine", b4["verdict"]["decision"] == "blocked",
+              b4["verdict"]["reason"])
+    finally:
+        if saved is not None:
+            os.environ["AEGIS_BATFISH_HOST"] = saved
+
+
+def http() -> None:
+    from ..serve import app
+    saved = os.environ.pop("AEGIS_BATFISH_HOST", None)
+    try:
+        c = app.test_client()
+        r = c.post("/api/preflight/run", json={"intent": "add vlan 10", "lab": "single",
+                                               "intents": [{"id": "x", "kind": "nope",
+                                                            "expect": "none"}]})
+        check("I11.bad_intents_400", r.status_code == 400 and "intents:" in r.get_data(as_text=True),
+              f"{r.status_code} {r.get_data(as_text=True)[:120]}")
+        r = c.post("/api/preflight/run", json={"intent": "add vlan 10", "lab": "single",
+                                               "operator": "ci", "intents": [DENY, ALLOW]})
+        b = r.get_json() or {}
+        ir = (b.get("validation") or {}).get("intents") or {}
+        check("I11.no_engine_blocks", r.status_code == 200
+              and b.get("verdict", {}).get("decision") == "blocked" and ir.get("errors") == 2,
+              f"{r.status_code} {str(b.get('verdict'))[:160]}")
+        cab = c.post("/api/preflight/evidence/cab", json=b).get_json() or {}
+        check("I11.cab_intents", (cab.get("intents") or {}).get("errors") == 2, str(cab.get("intents")))
+        pdf = c.post("/api/preflight/evidence/pdf", json=b)
+        check("I11.pdf_renders", pdf.status_code == 200 and pdf.data[:5] == b"%PDF-",
+              str(pdf.status_code))
+        st = c.get("/api/status").get_json() or {}
+        check("I11.status_engine", st.get("intents_engine") == "unconfigured"
+              and st.get("baseline_intents") == 0, str(st))
+        m = c.get("/metrics").get_data(as_text=True)
+        check("I11.metrics", 'aegis_intent_results_total{status="error"}' in m, m[-400:])
+    finally:
+        if saved is not None:
+            os.environ["AEGIS_BATFISH_HOST"] = saved
+
+
+def main() -> int:
+    http()
+    spec()
+    semantics()
+    snapshots()
+    pipeline()
+    if FAILS:
+        print("\n=== INTENTS TEST: FAIL ===")
+        for f in FAILS:
+            print("  -", f)
+        return 1
+    print(f"\n=== INTENTS TEST: PASS ({CHECKS} checks) ===")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

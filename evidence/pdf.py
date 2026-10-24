@@ -144,6 +144,39 @@ def render_pdf(bundle: dict, authenticity: str | None = None) -> bytes:
     ct.setStyle(TableStyle(cstyle))
     el.append(ct)
 
+    # intent checks (v1.4) — before (reference) → after (candidate)
+    ir = bundle["validation"].get("intents")
+    if ir:
+        el.append(Paragraph(
+            f"Intent checks · engine {_esc(ir.get('engine'))} · "
+            f"{_esc(ir.get('failed'))} failed · {_esc(ir.get('errors'))} not evaluable · "
+            f"{_esc(ir.get('regressions'))} regression(s)", ss["AegisH2"]))
+        irows = [["Intent", "Before", "After", "Evidence"]]
+        for r in ir.get("results") or []:
+            ev = r.get("evidence", "")
+            if r.get("control"):
+                ev = f"[{r['control']}] {ev}"
+            if r.get("examples"):
+                ev += " · e.g. " + "; ".join(r["examples"][:2])
+            irows.append([Paragraph(_esc(r.get("id")), ss["AegisBody"]),
+                          (r.get("before") or "—").upper(), str(r.get("status")).upper(),
+                          Paragraph(_esc(ev), ss["AegisBody"])])
+        it = Table(irows, colWidths=[38 * mm, 16 * mm, 16 * mm, None])
+        istyle = [
+            ("BACKGROUND", (0, 0), (-1, 0), _INK),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+            ("GRID", (0, 0), (-1, -1), 0.4, _LINE),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]
+        for i, r in enumerate(ir.get("results") or [], start=1):
+            col = (colors.HexColor("#1f8f4e") if r.get("status") == "pass"
+                   else colors.HexColor("#c0392b"))
+            istyle += [("TEXTCOLOR", (2, i), (2, i), col),
+                       ("FONTNAME", (2, i), (2, i), "Helvetica-Bold")]
+        it.setStyle(TableStyle(istyle))
+        el.append(it)
+
     bf = bundle["validation"]["batfish"]
     el.append(Spacer(1, 4))
     el.append(Paragraph(
