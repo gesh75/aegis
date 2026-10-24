@@ -149,17 +149,6 @@ function render(b){
       '<div class="dev">grounded: '+h(c.grounded_commands.join(' · ')||'—')+'</div>'
     ).join('');
 
-  // v1.4 intent checks: before → after per intent; error is shown as a failure, never a pass
-  function intentsHtml(ir){
-    if(!ir) return '';
-    return '<div class="kv"><span>intents ('+h(ir.engine)+')</span><b>'+h(ir.failed)+
-      ' fail · '+h(ir.errors)+' n/e · '+h(ir.regressions)+' regression</b></div>'+
-      '<div style="margin:6px 0">'+(ir.results||[]).map(r=>{
-        const cls=r.status==='pass'?'pass':'fail';
-        return '<span class="chip '+cls+'" title="'+h(r.evidence)+'">'+h(r.id)+' · '+
-          h(r.before||'—')+'→'+h(r.status)+(r.regression?' ⚠':'')+'</span>';}).join('')+
-      '</div>';
-  }
   const bf=b.validation.batfish;
   document.getElementById('c-evidence').innerHTML='<h3>Evidence &amp; compliance</h3>'+
     '<div class="kv"><span>batfish</span><b>'+h(bf.errors)+' err · '+h(bf.warnings)+
@@ -171,17 +160,40 @@ function render(b){
         return '<span class="chip '+cls+'">'+h(x.framework)+' '+h(x.control)+
           ' · '+h(lbl)+'</span>';}).join('')+'</div>'+
     (bf.findings.length?'<pre>'+h(bf.findings.join('\n'))+'</pre>':'')+
-    intentsHtml(b.validation.intents)+
     '<div class="dev">rollback steps: '+h(b.rollback.plan.length)+
       ' · tested in twin: '+(b.rollback.tested_in_twin?'yes':'no')+'</div>'+
     '<div style="margin-top:12px"><button id="pdfBtn" type="button" '+
       'style="background:transparent;border:1px solid var(--acc);color:var(--acc);'+
       'font-weight:600">⬇ Download evidence PDF</button></div>';
 
+  renderIntents(b.validation.intents);
+
   document.getElementById('foot').innerHTML=
     'run '+h(b.run_id)+' · '+h(b.created_utc)+' · generated_by '+h(b.integrity.generated_by)+
     ' · egress '+h(b.integrity.egress)+'<br>sha256 '+h(b.integrity.sha256);
 }
+// v1.4 intent checks: before → after per intent; error is shown as a failure, never a pass.
+// Built with DOM nodes + textContent (no HTML strings), so no intent field can become markup.
+function renderIntents(ir){
+  if(!ir) return;
+  const el=(tag,cls,text)=>{const n=document.createElement(tag);
+    if(cls) n.className=cls; if(text!=null) n.textContent=String(text); return n;};
+  const wrap=el('div');
+  const kv=el('div','kv');
+  kv.append(el('span',null,'intents ('+ir.engine+')'),
+            el('b',null,ir.failed+' fail · '+ir.errors+' n/e · '+ir.regressions+' regression'));
+  const chips=el('div','intent-chips');
+  (ir.results||[]).forEach(r=>{
+    const c=el('span','chip '+(r.status==='pass'?'pass':'fail'),
+      r.id+' · '+(r.before||'—')+'→'+r.status+(r.regression?' ⚠':''));
+    c.title=String(r.evidence||'');
+    chips.append(c);
+  });
+  wrap.append(kv,chips);
+  const card=document.getElementById('c-evidence');
+  card.insertBefore(wrap, card.querySelector('.dev'));
+}
+
 // Escape every HTML-significant char so server/LLM-derived values can never break
 // out of the markup they are injected into. h() coerces null/number/etc. to a string
 // first so callers can pass any field value straight through.
