@@ -5,6 +5,30 @@ versioning is [SemVer](https://semver.org).
 
 ## [Unreleased]
 
+### Intent checks via Batfish: reachability, ACL, BGP, references (bundle v1.4)
+Closes the biggest gap from the strategy doc, G1 (reachability and ACL analysis).
+
+- `core/intents/`: a declarative intent spec in JSON or YAML. Unknown kinds or fields are
+  rejected. The fail-closed evaluator runs a **before/after differential** against a
+  reference snapshot and flags regressions. A parse-fidelity gate turns every intent into
+  `error` when the candidate doesn't parse. A vacuous `allow` (no matching flow) is an
+  error, not a pass.
+- Snapshot materialization: Junos `set` deltas are merged onto the base config, other
+  vendors need a full-config replacement, and file names are sanitized.
+- A pybatfish oracle runs against an in-perimeter `batfish/allinone` (optional
+  `requirements-batfish.txt`). Snapshots are uploaded under unique names and deleted.
+- Pipeline: a failed or un-evaluable intent sets the verdict to `blocked`, with risk and
+  severity treated like a static-analysis error. Results are sealed under
+  `validation.intents` (schema **v1.4**).
+- API: `intents` in `POST /api/preflight/run`, and an org baseline via
+  `AEGIS_INTENTS_PATH` (invalid means the server refuses to start). `/api/status` reports
+  the engine. New metric: `aegis_intent_results_total{status}`.
+- Evidence: the PDF has an intent table (before → after, control, example flows), and
+  CAB and OSCAL include intent observations and findings. The UI shows intent chips.
+- Tests: `intents_test` (51 checks, fixture oracle) and a **new CI job `batfish`** running
+  `batfish_live_test` against a real `batfish/allinone`.
+- Docs: `docs/INTENTS.md`.
+
 ### Docs: competitive landscape and positioning correction (2026-10-23)
 - `docs/STRATEGY_2026-10.md` §3 adds a sourced market map (12 vendors and categories), two
   capability matrices (assurance depth; governance and evidence), ranked gaps and

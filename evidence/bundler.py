@@ -33,12 +33,15 @@ def build_bundle(*, run_id, created, operator, intent, source, configs, batfish,
                  authority: dict | None = None,
                  signed: bool = False,
                  change_ref: str | None = None,
-                 rollback_verified: bool = False) -> dict:
+                 rollback_verified: bool = False,
+                 intents: dict | None = None,
+                 verify_errors: int | None = None) -> dict:
     severity = _severity(diff["devices_affected"],
                          len(diff["sessions_dropped"]),
-                         batfish["errors"], twin["converged"])
+                         batfish["errors"] if verify_errors is None else verify_errors,
+                         twin["converged"])
     bundle = {
-        "bundle_version": "1.3",
+        "bundle_version": "1.4",
         "run_id": run_id,
         "created_utc": created,
         "operator": operator,
@@ -85,6 +88,8 @@ def build_bundle(*, run_id, created, operator, intent, source, configs, batfish,
                 "severity": severity,
             },
             "compliance": compliance,
+            # v1.4: declarative intent checks (null = none requested). Covered by sha256.
+            "intents": intents,
         },
         # v1.3: forward convergence is NOT a tested rollback. Until a backend actually
         # applies the reversal in the twin and re-checks state, the plan is a plan.

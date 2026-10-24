@@ -37,6 +37,7 @@ from aegis.core.promote.tokens import (
 from aegis.core.promote import approvers
 from aegis.core import runtime
 from aegis.evidence.ledger import Ledger, sink_from_env
+from aegis.core.intents import IntentSpecError, load_intents, parse_intents
 
 _UI = os.path.join(os.path.dirname(__file__), "ui", "preflight_screen.html")
 _UI_JS = os.path.join(os.path.dirname(__file__), "ui", "preflight.js")
@@ -112,6 +113,21 @@ _VERIFIER: Ed25519Verifier = _SIGNER.verifier()
 load_approve_key()  # SystemExit if AEGIS_APPROVE_KEY is set but unusable
 approvers.load_registry()  # SystemExit if AEGIS_APPROVER_KEYS is malformed
 _LEDGER = Ledger(os.environ.get("AEGIS_LEDGER_PATH") or None, sink=sink_from_env())
+
+
+def _load_baseline_intents() -> list[dict]:
+    """Org-wide intents (e.g. 'guest never reaches the CDE') applied to EVERY run.
+    A set-but-invalid file is fatal — a typo must never silently drop a security intent."""
+    path = (os.environ.get("AEGIS_INTENTS_PATH") or "").strip()
+    if not path:
+        return []
+    try:
+        return load_intents(path)
+    except (OSError, IntentSpecError) as exc:
+        raise SystemExit(f"[aegis.intents] AEGIS_INTENTS_PATH invalid ({exc}); refusing to start")
+
+
+_BASELINE_INTENTS = _load_baseline_intents()
 
 # Prometheus counters (text exposition, no client library — air-gap friendly).
 _METRICS: dict[tuple[str, tuple], int] = {}
@@ -204,6 +220,9 @@ def status():
         "approver_identity": "registry" if approvers.registry_configured() else "asserted",
         "seal": "pinned" if (os.environ.get("AEGIS_SEAL_KEY") or "").strip() else "ephemeral",
         "ledger": _LEDGER.head()["storage"],
+        "intents_engine": ("batfish" if (os.environ.get("AEGIS_BATFISH_HOST") or "").strip()
+                           else "unconfigured"),
+        "baseline_intents": len(_BASELINE_INTENTS),
         "egress": "none",
     })
 
@@ -276,6 +295,12 @@ def preflight_run():
                                      "with an HMAC token, not asserted at preflight",
                             "stage": "guard"}), 400
 
+    try:
+        req_intents = parse_intents(data["intents"]) if data.get("intents") else []
+        intents = parse_intents(_BASELINE_INTENTS + req_intents)  # re-validate: dup ids
+    except IntentSpecError as e:
+        return jsonify({"error": f"intents: {e}", "stage": "guard"}), 400
+
     source = (data.get("source") or "nl_intent").strip()
     imported = None
     if source == "config_import":
@@ -295,7 +320,8 @@ def preflight_run():
             frameworks=data.get("frameworks") or ["pci_dss_v4"],
             operator=(data.get("operator") or "community").strip(),
             approver=data.get("approver") or None,
-            source=source, imported_configs=imported, change_ref=change_ref)
+            source=source, imported_configs=imported, change_ref=change_ref,
+            intents=intents or None)
     except PreflightError as e:
         _inc("aegis_preflight_runs_total", decision="guard_rejected")
         return jsonify({"error": str(e), "stage": "guard"}), 400
@@ -309,12 +335,16 @@ def preflight_run():
     bundle["seal"] = seal
     decision = bundle["verdict"]["decision"]
     _inc("aegis_preflight_runs_total", decision=decision)
+    for row in ((bundle["validation"].get("intents") or {}).get("results") or []):
+        _inc("aegis_intent_results_total", status=row["status"])
     _LEDGER.append("preflight_run", run_id=bundle["run_id"],
                    bundle_sha256=bundle["integrity"]["sha256"], decision=decision,
                    risk_tier=bundle["change"]["risk_tier"],
                    authority=bundle["change"]["authority"]["effective"],
                    operator=bundle.get("operator"), change_ref=change_ref,
-                   sealed=isinstance(seal, dict))
+                   sealed=isinstance(seal, dict),
+                   intents_failed=(bundle["validation"].get("intents") or {}).get("failed"),
+                   intents_errors=(bundle["validation"].get("intents") or {}).get("errors"))
     return jsonify(bundle)
 
 

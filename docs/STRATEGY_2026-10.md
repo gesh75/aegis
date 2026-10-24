@@ -201,7 +201,7 @@ Legend: ● Confirmed by a cited source · ◑ Inferred (well known, not cited h
 
 | # | Gap | Who does it | Impact | Fix |
 |---|---|---|---|---|
-| G1 | No reachability, ACL or firewall analysis | Forward Predict, Batfish, NSPM vendors | **Critical.** Most network security risk is segmentation and policy, not BGP session counts. | P3: embed Batfish (Apache-2.0, offline container) for reachability and ACL intents |
+| G1 | No reachability, ACL or firewall analysis | Forward Predict, Batfish, NSPM vendors | **Critical.** Most network security risk is segmentation and policy, not BGP session counts. | **In progress (2026-10-24):** intent engine on Batfish (`docs/INTENTS.md`) covering reachability allow/deny, BGP, undefined references and shadowed ACL lines, with a before/after differential. A real-engine CI job is added. Still open: firewall/NAT zone policies (PAN-OS, SRX) and F5. |
 | G2 | No ServiceNow integration | NetBrain, Tufin, Forward AI | High. CAB evidence has to be attached by hand. | P3: attach the verdict and PDF to the CHG, and block CAB on `blocked` |
 | G3 | No post-change verification or drift detection | IP Fabric, Apstra, NetBox Assurance, Cisco NDI | High. You prove the plan, not the outcome. | P4: snapshot production after the push and diff it against the twin |
 | G4 | Twin fidelity unproven in this repo (community tier is a simulator) | NetPilot and Nokia EDA (real NOS); Forward (mathematical model at scale) | High. Credibility. | Pilot with cRPD/vJunos on the DC fabric lab and publish fidelity results |

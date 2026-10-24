@@ -73,7 +73,7 @@ material, which is not proof of absence. Sources are in `docs/STRATEGY_2026-10.m
 | Twin | mathematical model (Predict GA 2026-09-29) | real NOS containers | **containerlab emulation** (live tier) / simulator (community) |
 | Hosting | on-prem or SaaS | cloud; on-prem / air-gapped via sales | **on-prem / air-gapped, open source** |
 | LLM | Forward AI (hosting model: ?) | local LLM on-prem (vendor claim) | **self-hosted, loopback-enforced** |
-| Reachability / ACL analysis | **yes** | in-lab | not yet (roadmap: Batfish) |
+| Reachability / ACL analysis | **yes** | in-lab | **yes, via in-perimeter Batfish intents** (before/after differential, [`docs/INTENTS.md`](docs/INTENTS.md)) |
 | Evidence an auditor verifies offline | ? | ? | **Ed25519-sealed bundle + `aegis.verify`** |
 | Approval: SoD + single-use, bound to config | ? | ? | **yes, plus hash-chained ledger** |
 | Output | reports / API | pre/post diff | **sealed, 11-framework evidence + PDF / OSCAL / CAB** |
@@ -184,6 +184,8 @@ see [`SECURITY.md`](SECURITY.md).
 | compliance frameworks | per-module `SELF_TEST` (incl. Junos set + `{}` form) | yes |
 | seal / authority / ceiling / LLM egress / wedge | property suites | yes |
 | hardening (G0 seal, SoD, replay, ledger, SIEM anchor, peer-AS policy, CSP, prod mode, CLI) | 65 checks | yes |
+| intent engine (spec, differential, fidelity gate, fail-closed) | 51 checks, fixture oracle | yes |
+| **live Batfish** intents (real `batfish/allinone`) | Cisco ACL regression fixture | yes (`batfish` job) |
 | Bandit SAST · pip-audit · container smoke | gate on HIGH / any CVE / non-root | yes |
 
 See [`docs/DEVELOPER.md`](docs/DEVELOPER.md). Strategy, competitor analysis and roadmap:
@@ -202,6 +204,7 @@ core/runtime.py      community vs production (fail-closed) mode
 evidence/            bundler · sha256 integrity · OSCAL AR · CAB · 11-framework crosswalk · PDF
 evidence/ledger.py   append-only hash-chained audit ledger
 evidence/secrets.py  vendor-aware secret detection + redaction · evidence/junos.py {}→set
+core/intents/        Batfish intent checks: reachability / ACL / BGP / refs, before→after
 verify.py            offline auditor CLI (integrity + seal + ledger)
 ui/                  self-contained PreFlight dashboard
 serve.py             standalone community server (sim tier)

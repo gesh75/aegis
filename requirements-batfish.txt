@@ -1,0 +1,3 @@
+# Optional: declarative intent checks via an in-perimeter Batfish service (batfish/allinone)
+-r requirements.txt
+pybatfish

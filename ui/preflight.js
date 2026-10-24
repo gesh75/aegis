@@ -149,6 +149,17 @@ function render(b){
       '<div class="dev">grounded: '+h(c.grounded_commands.join(' · ')||'—')+'</div>'
     ).join('');
 
+  // v1.4 intent checks: before → after per intent; error is shown as a failure, never a pass
+  function intentsHtml(ir){
+    if(!ir) return '';
+    return '<div class="kv"><span>intents ('+h(ir.engine)+')</span><b>'+h(ir.failed)+
+      ' fail · '+h(ir.errors)+' n/e · '+h(ir.regressions)+' regression</b></div>'+
+      '<div style="margin:6px 0">'+(ir.results||[]).map(r=>{
+        const cls=r.status==='pass'?'pass':'fail';
+        return '<span class="chip '+cls+'" title="'+h(r.evidence)+'">'+h(r.id)+' · '+
+          h(r.before||'—')+'→'+h(r.status)+(r.regression?' ⚠':'')+'</span>';}).join('')+
+      '</div>';
+  }
   const bf=b.validation.batfish;
   document.getElementById('c-evidence').innerHTML='<h3>Evidence &amp; compliance</h3>'+
     '<div class="kv"><span>batfish</span><b>'+h(bf.errors)+' err · '+h(bf.warnings)+
@@ -160,6 +171,7 @@ function render(b){
         return '<span class="chip '+cls+'">'+h(x.framework)+' '+h(x.control)+
           ' · '+h(lbl)+'</span>';}).join('')+'</div>'+
     (bf.findings.length?'<pre>'+h(bf.findings.join('\n'))+'</pre>':'')+
+    intentsHtml(b.validation.intents)+
     '<div class="dev">rollback steps: '+h(b.rollback.plan.length)+
       ' · tested in twin: '+(b.rollback.tested_in_twin?'yes':'no')+'</div>'+
     '<div style="margin-top:12px"><button id="pdfBtn" type="button" '+

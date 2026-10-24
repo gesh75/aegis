@@ -79,6 +79,28 @@ def to_oscal(bundle: dict, authenticity: str | None = None) -> dict:
                 "related-observations": [{"observation-uuid": obs_uuid}],
                 "related-controls": [{"control-id": cid}],
             })
+    # v1.4 intent checks → TEST observations; fail/error → findings (error is NOT a pass)
+    ir = (bundle.get("validation") or {}).get("intents") or {}
+    for j, r in enumerate(ir.get("results") or []):
+        obs_uuid = _u(run, "intent-obs", str(j))
+        cid = str(r.get("control") or f"aegis-intent:{r.get('id')}")
+        observations.append({
+            "uuid": obs_uuid,
+            "description": (f"intent {r.get('id')} ({r.get('kind')}, expect "
+                            f"{r.get('expect')}): before={r.get('before')} "
+                            f"after={r.get('status')} — {r.get('evidence')}"),
+            "methods": ["TEST"],
+            "collected": created,
+        })
+        if r.get("status") != "pass":
+            findings.append({
+                "uuid": _u(run, "intent-find", str(j)),
+                "title": f"intent {r.get('id')} {r.get('status')}",
+                "description": str(r.get("evidence") or ""),
+                "target": {"type": "objective-id", "target-id": cid,
+                           "status": {"state": "not-satisfied"}},
+                "related-observations": [{"observation-uuid": obs_uuid}],
+            })
     seal_alg = None
     if isinstance(seal, dict):
         seal_alg = ((seal.get("signature") or {}).get("alg"))
