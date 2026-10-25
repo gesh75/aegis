@@ -57,7 +57,7 @@ HITRUST 09.b, and DORA Art. 17 as a benchmark.
 - Only BGP session counts are verified in the twin. There is no reachability, ACL or firewall
   policy analysis, which is where most network security risk lives.
 - There is no post-change verification against production.
-- There is no ServiceNow, NetBox or Batfish-native integration yet.
+- ServiceNow, NetBox and Batfish integrations are built (Batfish is proven live in CI). ServiceNow and NetBox are contract-tested and still need a live instance (2026-10-25).
 
 **Recommendation.** Pilot AEGIS in **production mode** as a *pre-change evidence gate*
 attached to ServiceNow normal changes for a single domain: DC fabric BGP/EVPN on Junos.
@@ -190,8 +190,8 @@ Legend: ● Confirmed by a cited source · ◑ Inferred (well known, not cited h
 | Hash-chained audit ledger + SIEM anchor | ● | ? | ? | ? | ? | ◐ ("logs every action") | ◐ (drift history) |
 | Per-change compliance crosswalk (multi-framework) | ● (11 frameworks, labelled config-checked or process-mapped) | ◑ (compliance verification) | ◐ (best-practice checks) | ? | ? | ◑ (PCI and similar reports) | ○ |
 | OSCAL output | ◐ (AR-shaped, not schema-validated) | ? | ? | ? | ? | ? | ? |
-| ServiceNow integration | ○ (`change_ref` field only) | ● (Forward AI) | ? | ● | ? | ● (Tufin ITSM), ◐ (FireMon) | ? |
-| NetBox integration | ○ | ● (`fwd-netbox`) | ● | ? | ? | ? | ● |
+| ServiceNow integration | ◐ (CHG attach + hold built; not yet live) | ● (Forward AI) | ? | ● | ? | ● (Tufin ITSM), ◐ (FireMon) | ? |
+| NetBox integration | ◐ (roles + sealed rev built; not yet live) | ● (`fwd-netbox`) | ● | ? | ? | ? | ● |
 | MCP / agent tool surface | ○ (REST only) | ● | ● | ◐ (roadmap) | ● | ? | ? |
 | Self-hosted LLM enforced (zero egress) | ● (loopback-only check) | ? | n/a | ? | ◐ (claimed on-prem; Conflicting) | n/a | n/a |
 | Open source, inspectable gate logic | ● (Apache-2.0) | ○ | ○ | ○ | ○ (has a GitHub org; product is commercial) | ○ | ◐ (NetBox core only) |
@@ -203,11 +203,11 @@ Legend: ● Confirmed by a cited source · ◑ Inferred (well known, not cited h
 | # | Gap | Who does it | Impact | Fix |
 |---|---|---|---|---|
 | G1 | No reachability, ACL or firewall analysis | Forward Predict, Batfish, NSPM vendors | **Critical.** Most network security risk is segmentation and policy, not BGP session counts. | **In progress (2026-10-24):** intent engine on Batfish (`docs/INTENTS.md`) covering reachability allow/deny, BGP, undefined references and shadowed ACL lines, with a before/after differential. A real-engine CI job is added. Still open: firewall/NAT zone policies (PAN-OS, SRX) and F5. |
-| G2 | No ServiceNow integration | NetBrain, Tufin, Forward AI | High. CAB evidence has to be attached by hand. | P3: attach the verdict and PDF to the CHG, and block CAB on `blocked` |
-| G3 | No post-change verification or drift detection | IP Fabric, Apstra, NetBox Assurance, Cisco NDI | High. You prove the plan, not the outcome. | P4: snapshot production after the push and diff it against the twin |
+| G2 | No ServiceNow integration | NetBrain, Tufin, Forward AI | High. CAB evidence has to be attached by hand. | **Built 2026-10-25 (contract-tested, not yet live):** `POST /api/integrations/servicenow/sync` attaches the redacted PDF and verdict JSON to the sealed CHG, writes `u_aegis_verdict`, and puts blocked changes on hold. A business-rule recipe for hard CAB enforcement is in `docs/INTEGRATIONS.md`. Needs an instance and service account to go live. |
+| G3 | No post-change verification or drift detection | IP Fabric, Apstra, NetBox Assurance, Cisco NDI | High. You prove the plan, not the outcome. | **Partly built 2026-10-25:** `POST /api/postchange/verify` proves the sealed lines landed (Junos set/delete, Cisco line/no) and re-runs intents on the running configs. Continuous drift detection is still open. |
 | G4 | Twin fidelity unproven in this repo (community tier is a simulator) | NetPilot and Nokia EDA (real NOS); Forward (mathematical model at scale) | High. Credibility. | Pilot with cRPD/vJunos on the DC fabric lab and publish fidelity results |
-| G5 | Firewall and load-balancer domains (PAN-OS, F5) | NSPM vendors | Medium | P4, a second domain. Or *consume* NSPM results as evidence instead of rebuilding them. |
-| G6 | No NetBox source-of-truth | IP Fabric, Forward, NetBox Assurance | Medium. Roles are guessed from device names. | P3: NetBox roles and `inventory_rev` |
+| G5 | Firewall and load-balancer domains (PAN-OS, F5) | NSPM vendors | Medium | **PAN-OS and SRX built 2026-10-25:** `firewall_policy` (zone-to-zone transit) and `nat` intents, proven against live Batfish in CI. F5 is still open. Consuming NSPM results remains an option. |
+| G6 | No NetBox source-of-truth | IP Fabric, Forward, NetBox Assurance | Medium. Roles are guessed from device names. | **Built 2026-10-25 (contract-tested, not yet live):** NetBox roles can only *raise* authority; `netbox:<sha256>` is sealed as `twin.inventory_rev` and bound into v2 tokens. Production fails closed if NetBox is unreachable. |
 | G7 | No MCP tool surface | Forward, IP Fabric, NetPilot | Medium. Agents will call whatever exposes MCP. | Expose `preflight`, `verify` and `promote` as MCP tools behind the same gate |
 | G8 | Support, scale and bus factor (one maintainer) | Every commercial vendor | Medium for a control of record | Internal ownership plus a RACI (§4.3); keep the open-source core |
 

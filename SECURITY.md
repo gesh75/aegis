@@ -58,6 +58,6 @@ capabilities dropped, `no-new-privileges`.
 ## Supply chain
 
 - Every GitHub Action is pinned to a commit SHA, and the workflow token is `contents: read`.
-- CI runs 16 test suites plus a live Batfish job, Bandit SAST (high severity gates the build), pip-audit (any known CVE in a runtime dependency gates the build), and a container smoke test that also asserts the server runs as a non-root user.
+- CI runs 17 test suites plus a live Batfish job, Bandit SAST (high severity gates the build), pip-audit (any known CVE in a runtime dependency gates the build), and a container smoke test that also asserts the server runs as a non-root user.
 - Dependabot watches pip, GitHub Actions and the base image.
 - Runtime and dev dependencies are split (`requirements.txt` / `requirements-dev.txt`). No test tooling ships in the image.

@@ -83,7 +83,8 @@ material, which is not proof of absence. Sources are in `docs/STRATEGY_2026-10.m
 | Twin | mathematical model (Predict GA 2026-09-29) | real NOS containers | **containerlab emulation** (live tier) / simulator (community) |
 | Hosting | Enterprise: on-prem or SaaS (documented); **Predict on-prem parity: ?** | cloud; on-prem / air-gapped via sales (vendor claim; its pricing page conflicts) | **on-prem / air-gapped by default, open source** |
 | LLM | Forward AI (hosting model: ?) | local LLM on-prem (vendor claim) | **self-hosted, loopback-enforced by default** (`AEGIS_AIRGAP=0` opts out) |
-| Reachability / ACL analysis | **yes** | in-lab | **yes, via in-perimeter Batfish intents** (before/after differential, [`docs/INTENTS.md`](docs/INTENTS.md)) |
+| Reachability / ACL analysis | **yes** | in-lab | **yes, via in-perimeter Batfish intents** (reachability, ACL, SRX/PAN-OS zone policy and NAT; before/after differential, [`docs/INTENTS.md`](docs/INTENTS.md)) |
+| ITSM / source of truth | ServiceNow, NetBox | ? | **ServiceNow CHG attach + hold, NetBox roles + sealed inventory rev, post-change verify** ([`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md); contract-tested, not yet live) |
 | Evidence an auditor verifies offline | ? | ? | **Ed25519-sealed bundle + `aegis.verify`** |
 | Approval: SoD + single-use, bound to config | ? | ? | **yes, plus hash-chained ledger** |
 | Output | reports / API | pre/post diff | **sealed, 11-framework evidence + PDF / CAB / AEGIS-shaped OSCAL AR (not schema-validated)** |
