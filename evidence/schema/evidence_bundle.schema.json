@@ -143,7 +143,7 @@
                 "required": ["id", "kind", "expect", "status", "evidence", "examples", "before"],
                 "properties": {
                   "id":         { "type": "string" },
-                  "kind":       { "enum": ["reachability", "bgp_sessions", "undefined_references", "filter_line_reachability"] },
+                  "kind":       { "enum": ["reachability", "bgp_sessions", "undefined_references", "filter_line_reachability", "firewall_policy", "nat"] },
                   "expect":     { "type": "string" },
                   "status":     { "enum": ["pass", "fail", "error"] },
                   "before":     { "enum": ["pass", "fail", "error", null] },

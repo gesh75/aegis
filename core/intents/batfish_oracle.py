@@ -19,6 +19,31 @@ from pybatfish.datamodel.flow import HeaderConstraints, PathConstraints
 from .engine import OracleError
 
 
+def _g(obj, key, default=None):
+    """Attribute OR mapping access — pybatfish returns dataclasses, older versions dicts."""
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def _iface_name(value) -> tuple[str, str]:
+    """(hostname, interface) from a NodeInterfacePair, its dict form or 'host[iface]' text."""
+    host, name = _g(value, "hostname"), _g(value, "interface")
+    if host is not None and name is not None:
+        return str(host), str(name)
+    text = str(value)
+    if "[" in text and text.endswith("]"):
+        host, _, name = text[:-1].partition("[")
+        return host, name
+    return "", text
+
+
+def _zone_matches(found, zone: str) -> bool:
+    # Palo Alto zones may be namespaced per vsys in Batfish's model ("vsys1~trust")
+    z = str(found or "")
+    return z == zone or z.rsplit("~", 1)[-1] == zone
+
+
 def _rows(frame) -> list[dict]:
     try:
         return frame.to_dict(orient="records")
@@ -73,6 +98,35 @@ class BatfishOracle:
              else self.bf.q.filterLineReachability())
         return [f"{r.get('Sources')}: {r.get('Unreachable_Line')} — {r.get('Reason')}"
                 for r in self._ask(q)]
+
+    def zone_interfaces(self, node, zone):
+        rows = self._ask(self.bf.q.interfaceProperties(nodes=node, properties="Zone_Name"))
+        return sorted({_iface_name(r.get("Interface"))[1] for r in rows
+                       if _zone_matches(r.get("Zone_Name"), zone)})
+
+    def traceroute(self, *, start, src_ip, dst_ip, protocol, dst_port):
+        hdr: dict = {"srcIps": src_ip, "dstIps": dst_ip, "ipProtocols": [protocol.upper()]}
+        if dst_port:
+            hdr["dstPorts"] = str(dst_port)
+        out: list[dict] = []
+        for r in self._ask(self.bf.q.traceroute(startLocation=start,
+                                                headers=HeaderConstraints(**hdr))):
+            flow = r.get("Flow")
+            for t in r.get("Traces") or []:
+                final = {k: _g(flow, k) for k in ("srcIp", "dstIp", "srcPort", "dstPort")}
+                changes: list[str] = []
+                for hop in _g(t, "hops") or []:
+                    for step in _g(hop, "steps") or []:
+                        for fd in _g(_g(step, "detail"), "flowDiffs") or []:
+                            key = str(_g(fd, "fieldName"))
+                            final[key] = _g(fd, "newValue")
+                            changes.append(f"{_g(hop, 'node')}: {key} {_g(fd, 'oldValue')}"
+                                           f"→{_g(fd, 'newValue')}")
+                out.append({"disposition": str(_g(t, "disposition")),
+                            "final": {k: (None if v is None else str(v))
+                                      for k, v in final.items()},
+                            "changes": changes, "text": str(t)[:300]})
+        return out
 
 
 class BatfishSnapshots:

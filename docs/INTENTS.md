@@ -1,4 +1,4 @@
-# Intent checks (reachability, ACL, BGP, references)
+# Intent checks (reachability, ACL, BGP, references, firewall zones, NAT)
 
 AEGIS can assert **network intents** on every change. An intent is a statement such as
 "the guest VLAN can never reach the CDE" or "every ACL line is reachable". AEGIS checks
@@ -49,6 +49,26 @@ because a typo must never silently turn into "no check ran".
 | `bgp_sessions` | `all_established` | optional `nodes` | Every configured BGP session is established |
 | `undefined_references` | `none` | — | No reference to an undefined ACL, route-map, prefix-list and so on |
 | `filter_line_reachability` | `none` | optional `nodes` | No ACL or filter line is shadowed or unreachable |
+| `firewall_policy` | `deny` / `allow` | `node`, `from_zone`, `to_zone`, `dst_ips` (required); optional `src_ips`, `protocols`, `dst_ports` | Zone-to-zone policy on one firewall (Juniper SRX, Palo Alto, any zone-based config Batfish models). The flows start on **every** interface of `from_zone`. Deny and allow semantics are the same as for `reachability`. A zone with no interfaces on the node is an `error`, never a pass. |
+| `nat` | `translated` / `untranslated` | `start`, `src_ip`, `dst_ip` (single IPs); `protocol` (tcp/udp/icmp, default tcp); `dst_port` (required for tcp/udp); for `translated`, at least one of `translated_src_ip`, `translated_dst_ip`, `translated_dst_port` | One concrete flow is traced through the snapshot. It must be **delivered** (ACCEPTED, DELIVERED_TO_SUBNET or EXITS_NETWORK), and its post-NAT header must match. Every ECMP trace must agree. `untranslated` means no header field may change, for example east-west traffic that must keep its real source for logging. |
+
+### Firewall and NAT example
+
+```json
+{"intents": [
+  {"id": "untrust-cannot-reach-trust", "kind": "firewall_policy", "node": "fw1",
+   "from_zone": "untrust", "to_zone": "trust", "dst_ips": "10.1.0.0/24",
+   "protocols": ["tcp"], "expect": "deny", "control": "PCI DSS v4.0 1.3.2"},
+  {"id": "web-vip-dnat", "kind": "nat", "start": "@enter(fw1[ge-0/0/1.0])",
+   "src_ip": "198.51.100.7", "dst_ip": "203.0.113.10", "protocol": "tcp", "dst_port": 443,
+   "expect": "translated", "translated_dst_ip": "10.2.0.10"}
+]}
+```
+
+`to_zone` must exist on the node, otherwise the intent is an error. The egress path itself
+is decided by routing toward `dst_ips`, so a deny intent fails on a leak through **any**
+path, which is the conservative reading. Palo Alto zone names match with or without
+Batfish's `vsys1~` prefix.
 
 `start` is a Batfish location specifier, for example `@enter(node[interface])`. `control`
 is free text that is carried into the evidence, such as a PCI requirement number.
@@ -109,8 +129,12 @@ Review them, because unrecognized lines are invisible to every check.
   - regressions and fail-closed behavior;
   - snapshot materialization;
   - pipeline blocking;
+  - firewall zone resolution and NAT translation checks (I12, I13);
   - HTTP.
 - `tests/batfish_live_test.py` runs in the CI `batfish` job against a **real**
   `batfish/allinone`. A Cisco ACL change that opens guest→CDE SSH, adds a shadowed line and
   references an undefined ACL must produce three regressions, while the allowed web flow
-  stays a pass. Locally it skips unless `AEGIS_REQUIRE_BATFISH=1`.
+  stays a pass. A second fixture (`tests/fixtures/batfish/firewall`) does the same for an
+  SRX set-delta and a PAN-OS full config. A temporary vendor permit (both vendors) and a
+  retargeted DNAT pool must be three regressions, while trust→untrust HTTPS and both
+  source-NAT intents stay a pass. Locally it skips unless `AEGIS_REQUIRE_BATFISH=1`.

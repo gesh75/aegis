@@ -10,6 +10,12 @@ Proves the pybatfish oracle end to end on a real Cisco IOS snapshot
   L5  full pipeline (config_import) → verdict blocked, reason names the regressions, the
       sealed bundle carries the differential and integrity-verifies
   L6  a clean candidate (identical to reference) → all intents pass, nothing blocked by intents
+  F1  firewall snapshot (Juniper SRX fw1 + Palo Alto fw2, tests/fixtures/batfish/firewall)
+      parses; fw1 is a junos-set-merge, fw2 a full-config replace
+  F2  firewall_policy untrust→trust deny: pass → FAIL on both vendors (a temp-vendor permit
+      rule) — regressions
+  F3  nat: SRX web VIP DNAT pass → FAIL (pool retargeted to 10.2.0.99) — regression
+  F4  no false regressions: SRX trust→untrust allow, SRX and PAN source NAT stay pass
 
 Without pybatfish/AEGIS_BATFISH_HOST it SKIPS (exit 0) — unless AEGIS_REQUIRE_BATFISH=1
 (set in CI), where a skip is a failure.
@@ -92,6 +98,8 @@ def main() -> int:
     check("L6.clean_all_pass", all(r["status"] == "pass" for r in clean["results"])
           and clean["regressions"] == 0, json.dumps(clean["results"])[:1500])
 
+    firewall()
+
     if FAILS:
         print("\n=== BATFISH LIVE TEST: FAIL ===")
         for f in FAILS:
@@ -99,6 +107,41 @@ def main() -> int:
         return 1
     print(f"\n=== BATFISH LIVE TEST: PASS ({CHECKS} checks against a real Batfish) ===")
     return 0
+
+
+def firewall() -> None:
+    from ..core.intents import load_intents
+    from ..core.intents.runner import run_intents
+
+    fw = os.path.join(FIX, "firewall")
+    os.environ["AEGIS_BATFISH_SNAPSHOT_DIR"] = os.path.join(fw, "reference")
+    intents = load_intents(os.path.join(fw, "intents.json"))
+    configs = [
+        {"device": "fw1", "vendor": "junos",
+         "config": open(os.path.join(fw, "candidate_fw1.set"), encoding="utf-8").read()},
+        {"device": "fw2", "vendor": "panos",
+         "config": open(os.path.join(fw, "candidate_fw2.cfg"), encoding="utf-8").read()},
+    ]
+    rec = run_intents(intents, configs)
+    print(json.dumps(rec, indent=2)[:8000])
+    by = {r["id"]: r for r in rec["results"]}
+    check("F1.engine", rec["engine"] == "batfish", rec["engine"])
+    check("F1.fidelity", bool(rec.get("fidelity") and rec["fidelity"]["ok"]),
+          str(rec.get("fidelity")))
+    modes = {m["device"]: m["mode"] for m in rec["snapshot"].get("merge", [])}
+    check("F1.merge_modes", modes == {"fw1": "junos-set-merge", "fw2": "replace"}, str(modes))
+    for iid in ("srx-untrust-cannot-reach-trust", "pan-untrust-cannot-reach-trust",
+                "srx-web-vip-dnat"):
+        r = by.get(iid, {})
+        check(f"F2.{iid}", r.get("before") == "pass" and r.get("status") == "fail"
+              and r.get("regression") is True, json.dumps(r))
+    check("F3.dnat_names_wrong_target", "10.2.0.99" in json.dumps(by.get("srx-web-vip-dnat")),
+          json.dumps(by.get("srx-web-vip-dnat")))
+    for iid in ("srx-trust-reaches-untrust-https", "srx-inside-snat", "pan-inside-snat"):
+        r = by.get(iid, {})
+        check(f"F4.{iid}", r.get("before") == "pass" and r.get("status") == "pass",
+              json.dumps(r))
+    check("F4.regression_count", rec["regressions"] == 3, str(rec["regressions"]))
 
 
 if __name__ == "__main__":

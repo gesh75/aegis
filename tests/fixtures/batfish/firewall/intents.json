@@ -1,0 +1,24 @@
+{
+  "intents": [
+    {"id": "srx-untrust-cannot-reach-trust", "kind": "firewall_policy", "node": "fw1",
+     "from_zone": "untrust", "to_zone": "trust", "dst_ips": "10.1.0.0/24",
+     "protocols": ["tcp"], "expect": "deny", "control": "PCI DSS v4.0 1.3.2",
+     "description": "No inbound path from the internet zone to the inside zone"},
+    {"id": "srx-trust-reaches-untrust-https", "kind": "firewall_policy", "node": "fw1",
+     "from_zone": "trust", "to_zone": "untrust", "src_ips": "10.1.0.0/24",
+     "dst_ips": "203.0.113.50", "protocols": ["tcp"], "dst_ports": "443", "expect": "allow"},
+    {"id": "srx-web-vip-dnat", "kind": "nat", "start": "@enter(fw1[ge-0/0/1.0])",
+     "src_ip": "198.51.100.7", "dst_ip": "203.0.113.10", "protocol": "tcp", "dst_port": 443,
+     "expect": "translated", "translated_dst_ip": "10.2.0.10",
+     "description": "Public web VIP lands on the DMZ web server"},
+    {"id": "srx-inside-snat", "kind": "nat", "start": "@enter(fw1[ge-0/0/0.0])",
+     "src_ip": "10.1.0.5", "dst_ip": "203.0.113.50", "protocol": "tcp", "dst_port": 443,
+     "expect": "translated", "translated_src_ip": "203.0.113.1"},
+    {"id": "pan-untrust-cannot-reach-trust", "kind": "firewall_policy", "node": "fw2",
+     "from_zone": "untrust", "to_zone": "trust", "dst_ips": "10.11.0.0/24",
+     "protocols": ["tcp"], "expect": "deny", "control": "PCI DSS v4.0 1.3.2"},
+    {"id": "pan-inside-snat", "kind": "nat", "start": "@enter(fw2[ethernet1/1])",
+     "src_ip": "10.11.0.5", "dst_ip": "198.51.100.50", "protocol": "tcp", "dst_port": 443,
+     "expect": "translated", "translated_src_ip": "198.51.100.1"}
+  ]
+}
