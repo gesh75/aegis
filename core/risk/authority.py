@@ -63,8 +63,8 @@ class ChangeClass:
     touches_rd_rt: bool = False
     touches_spine: bool = False
     touches_underlay: bool = False
-    # Peer AS (remote-as / peer-as) under AEGIS_PEER_AS_POLICY=hitl: a peering change,
-    # not fabric identity. Under the default policy ("block") it folds into touches_asn.
+    # Peer AS (remote-as / peer-as) under AEGIS_PEER_AS_POLICY=hitl (default): a peering
+    # change, not fabric identity. Under AEGIS_PEER_AS_POLICY=block it folds into touches_asn.
     touches_peer_as: bool = False
 
     @property
@@ -86,10 +86,11 @@ _PEER_ASN_RE = re.compile(r"(?:remote-as|peer-as)\s+\d+", re.IGNORECASE)
 
 
 def peer_as_policy() -> str:
-    """AEGIS_PEER_AS_POLICY: ``block`` (default — peer AS is fabric identity, the original
-    fail-closed behavior) or ``hitl`` (a BGP neighbor add is a peering change: HITL minimum,
-    still never AUTO). Invalid values are fatal, never silently permissive."""
-    raw = (os.environ.get("AEGIS_PEER_AS_POLICY") or "block").strip().lower()
+    """AEGIS_PEER_AS_POLICY (decision D1): ``hitl`` (default — a BGP neighbor add is a
+    peering change: HITL minimum, never AUTO; the device's own AS, RD and RT stay BLOCK) or
+    ``block`` (the original behavior — any AS number, including the peer's, is fabric
+    identity). Invalid values are fatal, never silently permissive."""
+    raw = (os.environ.get("AEGIS_PEER_AS_POLICY") or "hitl").strip().lower()
     if raw not in ("block", "hitl"):
         raise ValueError(f"AEGIS_PEER_AS_POLICY must be block|hitl (got {raw!r})")
     return raw
@@ -241,8 +242,8 @@ def authority_record(severity: Severity, change_class: ChangeClass,
             "touches_rd_rt": change_class.touches_rd_rt,
             "touches_spine": change_class.touches_spine,
             "touches_underlay": change_class.touches_underlay,
-            # only recorded when the peer-AS policy is in effect, so default bundles keep
-            # their exact v1.2 shape
+            # only recorded under the hitl policy; with AEGIS_PEER_AS_POLICY=block the
+            # record keeps its exact v1.2 shape
             **({"touches_peer_as": change_class.touches_peer_as}
                if peer_as_policy() == "hitl" else {}),
         },

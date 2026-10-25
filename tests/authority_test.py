@@ -8,6 +8,7 @@ differential of the canonical severity engine vs the two legacy AEGIS scorers
 from __future__ import annotations
 
 import itertools
+import os
 import sys
 
 from aegis.core.backends.base import GeneratedConfig
@@ -71,10 +72,24 @@ def test_differential_vs_legacy_scorers() -> None:
 # ── classify_change: AS/RD/RT (reliable) + spine/underlay (heuristic) ────────────
 
 def test_classify_detects_asn() -> None:
-    assert classify_change([_cfg("router bgp 65001")]).touches_asn
-    assert classify_change([_cfg("set protocols bgp group X peer-as 65002")]).touches_asn
-    assert classify_change([_cfg("neighbor 10.0.0.1 remote-as 65003")]).touches_asn
-    assert not classify_change([_cfg("interface eth0\n ip address 10.0.0.1/31")]).touches_asn
+    old = os.environ.get("AEGIS_PEER_AS_POLICY")
+    try:
+        os.environ.pop("AEGIS_PEER_AS_POLICY", None)  # D1 default: hitl
+        assert classify_change([_cfg("router bgp 65001")]).touches_asn
+        assert classify_change([_cfg("set routing-options autonomous-system 65001")]).touches_asn
+        peer = classify_change([_cfg("set protocols bgp group X peer-as 65002")])
+        assert peer.touches_peer_as and not peer.touches_asn
+        peer = classify_change([_cfg("neighbor 10.0.0.1 remote-as 65003")])
+        assert peer.touches_peer_as and not peer.touches_asn
+        os.environ["AEGIS_PEER_AS_POLICY"] = "block"  # original: any AS is fabric identity
+        assert classify_change([_cfg("set protocols bgp group X peer-as 65002")]).touches_asn
+        assert classify_change([_cfg("neighbor 10.0.0.1 remote-as 65003")]).touches_asn
+        assert not classify_change([_cfg("interface eth0\n ip address 10.0.0.1/31")]).touches_asn
+    finally:
+        if old is None:
+            os.environ.pop("AEGIS_PEER_AS_POLICY", None)
+        else:
+            os.environ["AEGIS_PEER_AS_POLICY"] = old
 
 
 def test_classify_detects_rd_rt() -> None:

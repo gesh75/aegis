@@ -34,7 +34,8 @@ and it enforces the stricter request-time rules listed below.
 | `AEGIS_APPROVER_KEYS` | `name:sha256(credential)` per approver | `python -m aegis.core.promote.approvers alice@corp` |
 | `AEGIS_CHANGE_REF_PATTERN` *(optional)* | pin your ITSM numbering | e.g. `^CHG[0-9]{7}$` |
 | `AEGIS_LEDGER_SYSLOG` *(recommended)* | send every ledger entry to the SIEM (`host:port[/tcp\|/udp]`) | e.g. `127.0.0.1:514/tcp` to a local rsyslog relay that forwards over TLS. The sink itself sends plain TCP/UDP, not RFC 5425 TLS. |
-| `AEGIS_PEER_AS_POLICY` *(optional)* | `block` (default) or `hitl` for BGP neighbor adds | decision D1 in the strategy doc |
+| `AEGIS_PEER_AS_POLICY` *(optional)* | `hitl` (default since D1: a BGP neighbor add needs a second-person approval) or `block` (the original: no neighbor add is ever promotable). The device's own AS, RD and RT are always BLOCK. | decision D1 in the strategy doc |
+| `AEGIS_REVERSIBLE_SECRETS` *(optional)* | `fail` (default since D2: Cisco type 7 / Junos `$9$` fail PCI 8.3.2) or `report` | decision D2. Bundle JSON still carries secrets until D3 (`docs/DESIGN_D3_SECRET_REFERENCES.md`). Store bundles as Confidential. |
 
 Production request-time rules:
 
@@ -57,6 +58,6 @@ capabilities dropped, `no-new-privileges`.
 ## Supply chain
 
 - Every GitHub Action is pinned to a commit SHA, and the workflow token is `contents: read`.
-- CI runs 15 test suites, Bandit SAST (high severity gates the build), pip-audit (any known CVE in a runtime dependency gates the build), and a container smoke test that also asserts the server runs as a non-root user.
+- CI runs 16 test suites plus a live Batfish job, Bandit SAST (high severity gates the build), pip-audit (any known CVE in a runtime dependency gates the build), and a container smoke test that also asserts the server runs as a non-root user.
 - Dependabot watches pip, GitHub Actions and the base image.
 - Runtime and dev dependencies are split (`requirements.txt` / `requirements-dev.txt`). No test tooling ships in the image.

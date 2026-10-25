@@ -38,6 +38,8 @@ from aegis.core.promote import approvers
 from aegis.core import runtime
 from aegis.evidence.ledger import Ledger, sink_from_env
 from aegis.core.intents import IntentSpecError, load_intents, parse_intents
+from aegis.core.risk.authority import peer_as_policy
+from aegis.evidence.secrets import reversible_policy
 
 _UI = os.path.join(os.path.dirname(__file__), "ui", "preflight_screen.html")
 _UI_JS = os.path.join(os.path.dirname(__file__), "ui", "preflight.js")
@@ -125,6 +127,11 @@ def _require_api_key_for_hmac() -> None:
 
 _require_api_key_for_hmac()
 approvers.load_registry()  # SystemExit if AEGIS_APPROVER_KEYS is malformed
+for _policy in (peer_as_policy, reversible_policy):  # D1 / D2 switches: a typo is fatal
+    try:
+        _policy()
+    except ValueError as _exc:
+        raise SystemExit(f"[aegis.policy] {_exc}") from _exc
 _LEDGER = Ledger(os.environ.get("AEGIS_LEDGER_PATH") or None, sink=sink_from_env())
 
 

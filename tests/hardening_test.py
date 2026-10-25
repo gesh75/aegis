@@ -13,8 +13,8 @@
   H7  approver registry: mint needs the approver's own credential; identity comes from it
   H8  evidence honesty: rollback is plan-only; secrets redacted; PDF markup is escaped
   H9  /metrics + /healthz + /api/ledger/verify contract
-  H11 AEGIS_PEER_AS_POLICY: default keeps peer AS as BLOCK; ``hitl`` makes a neighbor add
-      HITL (sealable, needs approval) while router bgp / local-as stay BLOCK
+  H11 AEGIS_PEER_AS_POLICY (D1): the default ``hitl`` makes a neighbor add HITL (sealable, needs
+      approval) while router bgp / local-as stay BLOCK; ``block`` restores the original BLOCK
   H12 ledger SIEM anchor: entries arrive over UDP syslog with the chain hashes; a dead
       sink never blocks the append and is counted
   H13 air-gap is the DEFAULT: unset/typo → on, only "0" opts out; from_env() drops the cloud
@@ -373,10 +373,10 @@ def peer_as_policy() -> None:
             "grounded_commands": []}]
     own = [{"device": "leaf-1", "vendor": "frr", "config": "router bgp 65010",
             "grounded_commands": []}]
-    os.environ.pop("AEGIS_PEER_AS_POLICY", None)
-    check("H11.default_block",
+    os.environ["AEGIS_PEER_AS_POLICY"] = "block"
+    check("H11.block_policy_neighbor_block",
           required_authority(Severity.LOW, classify_change(nbr)) == Tier.BLOCK)
-    os.environ["AEGIS_PEER_AS_POLICY"] = "hitl"
+    os.environ.pop("AEGIS_PEER_AS_POLICY", None)  # D1 default = hitl
     try:
         check("H11.hitl_neighbor",
               required_authority(Severity.LOW, classify_change(nbr)) == Tier.HITL)
@@ -394,6 +394,29 @@ def peer_as_policy() -> None:
             check("H11.bad_policy_fatal", False, "accepted 'allow'")
         except ValueError:
             check("H11.bad_policy_fatal", True)
+        # D2 — reversible obfuscation fails PCI 8.3.2 by default; "report" restores PASS
+        from ..evidence.compliance import map_controls
+        j9 = [{"device": "mx1", "vendor": "junos", "grounded_commands": [],
+               "config": 'set protocols bgp group G authentication-key "$9$AbCdEf"'}]
+        bf = {"errors": 0, "warnings": 0, "passed": 1, "findings": []}
+
+        def pci_832():
+            rows = map_controls(j9, bf, ["pci_dss_v4"])
+            return next(r for r in rows if r["control"] == "8.3.2")
+
+        os.environ.pop("AEGIS_REVERSIBLE_SECRETS", None)
+        row = pci_832()
+        check("H11.d2_default_fail", row["status"] == "fail" and "reversible" in row["evidence"],
+              str(row))
+        os.environ["AEGIS_REVERSIBLE_SECRETS"] = "report"
+        check("H11.d2_report_pass", pci_832()["status"] == "pass")
+        os.environ["AEGIS_REVERSIBLE_SECRETS"] = "ignore"
+        try:
+            pci_832()
+            check("H11.d2_bad_policy_fatal", False, "accepted 'ignore'")
+        except ValueError:
+            check("H11.d2_bad_policy_fatal", True)
+        os.environ.pop("AEGIS_REVERSIBLE_SECRETS", None)
     finally:
         os.environ.pop("AEGIS_PEER_AS_POLICY", None)
 

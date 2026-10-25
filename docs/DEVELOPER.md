@@ -97,8 +97,9 @@ was previously under-counted; do not compare old vs new `bgp_sessions` numbers b
 
 | Change class (regex on candidate config / device name) | Floor |
 |---|---|
-| `router bgp N`, `remote-as`, `local-as`, `peer-as`, `autonomous-system` | BLOCK (default) |
-| `remote-as` / `peer-as` with `AEGIS_PEER_AS_POLICY=hitl` | ≥ HITL (peering change; `router bgp`/`local-as`/`autonomous-system` stay BLOCK) |
+| `router bgp N`, `local-as`, `autonomous-system` (the device's own AS) | BLOCK |
+| `remote-as` / `peer-as` (default `AEGIS_PEER_AS_POLICY=hitl`, D1) | ≥ HITL (peering change, never AUTO) |
+| `remote-as` / `peer-as` with `AEGIS_PEER_AS_POLICY=block` | BLOCK (the original behavior) |
 | `route-distinguisher` / `route-target` / `rd N:N` / `rt N:N` | BLOCK |
 | device name contains `spine`, or OSPF/ISIS/underlay text | ≥ HOTL |
 

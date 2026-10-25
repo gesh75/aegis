@@ -97,7 +97,7 @@ control of record:
 | N6 | Secrets (including type 7, `$9$` and hashes) were printed verbatim into the examiner PDF. | Medium | **Fixed.** Redacted in the PDF. **Still present in the bundle JSON** (see §7, decision D3). |
 | N7 | Bundle strings entered ReportLab markup unescaped: a 500 on `<`, and markup injection into the PDF. | Medium | **Fixed.** `_esc` everywhere. |
 | N8 | OSCAL export used non-UUID ids and missed required AR fields, so GRC ingestion would reject it. | Low | **Improved** (RFC 4122, `import-ap`, `target`, `collected`). **Not yet validated against the NIST schema.** |
-| N9 | **Every BGP neighbor add is BLOCK by default.** `classify_change` treats `remote-as` / `peer-as` (the *peer's* AS) as fabric identity, so the most common NetOps change can never be sealed or promoted. Measured: 0 of 1,000 "peer BGP" sim runs were sealable. | High (product) | **Default unchanged. An opt-in switch `AEGIS_PEER_AS_POLICY=hitl` ships (D1).** |
+| N9 | **Every BGP neighbor add was BLOCK by default.** `classify_change` treats `remote-as` / `peer-as` (the *peer's* AS) as fabric identity, so the most common NetOps change can never be sealed or promoted. Measured: 0 of 1,000 "peer BGP" sim runs were sealable. | High (product) | **Fixed (D1 applied):** a neighbor add is HITL by default (sealable, needs a second-person approval). `AEGIS_PEER_AS_POLICY=block` restores the original. |
 | N10 | Compliance hot path recomputed the normalized config about 23 times per run. | Low (perf) | **Fixed.** Memoized, 0.80 → 0.43 ms/run with 11 frameworks (about 1.9×). |
 
 **Test evidence (Confirmed).**
@@ -348,11 +348,11 @@ Each phase has an owner, an exit criterion and an effort estimate in engineer-we
 
 | # | Decision | Options | Recommendation |
 |---|---|---|---|
-| **D1** | Is a BGP neighbor add (`remote-as` / `peer-as`) fabric identity (BLOCK)? (N9) | (a) keep BLOCK; (b) treat peer AS as a *peering* change, HITL minimum, with only `router bgp N` / `local-as` / `autonomous-system` / RD / RT as BLOCK | **(b)**. Today the tool can never promote its most common change, so teams will route around it. **Shipped as a switch:** `AEGIS_PEER_AS_POLICY=hitl` (the default stays `block`). Flip it after InfoSec agrees. |
-| **D2** | Should Cisco type 7 and Junos `$9$` fail PCI 8.3.2? | (a) report only (current); (b) fail | **(b) for PCI-scoped devices.** Both are reversible obfuscation, not strong crypto. Needs InfoSec sign-off. |
-| **D3** | Secrets in the bundle JSON (the push artifact) | (a) keep (promotion pushes from the bundle); (b) replace with vault references resolved only by the connector | **(b) in P2.** Until then, treat bundles as Confidential. |
-| **D4** | Which standard governs? | IS-022P / ITS-025P / HITRUST (2020–21) or a newer set | Confirm the current version. This doc maps to the 2020–21 set found by the earlier session. |
-| **D5** | Pilot domain | DC fabric (Junos BGP/EVPN) vs WAN edge vs firewalls | **DC fabric.** Best twin fidelity (containerlab cRPD/vJunos), and the authority model already understands ASN/RD/RT/underlay. |
+| **D1** | Is a BGP neighbor add (`remote-as` / `peer-as`) fabric identity (BLOCK)? (N9) | (a) keep BLOCK; (b) treat peer AS as a *peering* change, HITL minimum, with only `router bgp N` / `local-as` / `autonomous-system` / RD / RT as BLOCK | **(b)**. Today the tool can never promote its most common change, so teams will route around it. **Applied 2026-10-25 (owner decision):** `hitl` is now the default. `AEGIS_PEER_AS_POLICY=block` restores the old behavior. The device's own AS, RD and RT stay BLOCK. InfoSec sign-off still needs to be recorded. |
+| **D2** | Should Cisco type 7 and Junos `$9$` fail PCI 8.3.2? | (a) report only (was the behavior); (b) fail | **(b) for PCI-scoped devices.** Both are reversible obfuscation, not strong crypto. **Applied 2026-10-25:** PCI 8.3.2 FAILs on them by default (the PCI framework runs only when selected, so selection = scope). `AEGIS_REVERSIBLE_SECRETS=report` restores PASS-with-note. Compliance rows are evidence and do not change the verdict. **Impact:** Junos stores every BGP/OSPF key as `$9$`, so a Junos change that carries a key fails 8.3.2 until D3 (vault references) or TCP-AO/keychain policy lands. InfoSec sign-off still needs to be recorded. |
+| **D3** | Secrets in the bundle JSON (the push artifact) | (a) keep (promotion pushes from the bundle); (b) replace with vault references resolved only by the connector | **(b) in P2.** Until then, treat bundles as Confidential. **Design recorded:** `docs/DESIGN_D3_SECRET_REFERENCES.md`. Not implemented. |
+| **D4** | Which standard governs? | IS-022P / ITS-025P / HITRUST (2020–21) or a newer set | Confirm the current version. This doc maps to the 2020–21 set found by the earlier session. **Open: owner input needed.** No change made. |
+| **D5** | Pilot domain | DC fabric (Junos BGP/EVPN) vs WAN edge vs firewalls | **DC fabric.** Best twin fidelity (containerlab cRPD/vJunos), and the authority model already understands ASN/RD/RT/underlay. **Recorded 2026-10-25** as the pilot domain. Firewall intents (SRX / PAN-OS zone and NAT) ship as the P2 expansion path. |
 
 ---
 
