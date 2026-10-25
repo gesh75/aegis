@@ -142,6 +142,51 @@ def firewall() -> None:
         check(f"F4.{iid}", r.get("before") == "pass" and r.get("status") == "pass",
               json.dumps(r))
     check("F4.regression_count", rec["regressions"] == 3, str(rec["regressions"]))
+    if any(f.startswith(("F2.", "F4.")) for f in FAILS):
+        _explain_firewall(fw)
+
+
+def _explain_firewall(fw: str) -> None:
+    """Diagnostics only: print the full Batfish traces for the untrust→trust flows on the
+    REFERENCE snapshot, so a failure shows which hop/filter let the flow through."""
+    from pybatfish.datamodel.flow import HeaderConstraints, PathConstraints
+    from ..core.intents.batfish_oracle import BatfishSnapshots
+    from ..core.intents.snapshot import read_base
+
+    ref = {f"configs/{k}.cfg": v for k, v in read_base(os.path.join(fw, "reference")).items()}
+    with BatfishSnapshots(os.environ["AEGIS_BATFISH_HOST"], "aegis-diag", None, ref) as (_, o):
+        bf, snap = o.bf, o.snapshot
+        print("\n--- DIAG: parse warnings ---")
+        try:
+            print(bf.q.parseWarning().answer(snapshot=snap).frame().to_string()[:3000])
+        except Exception as exc:  # noqa: BLE001
+            print("parseWarning failed:", exc)
+        for start, src, dst in (("@enter(fw1[ge-0/0/1.0])", "203.0.113.2", "10.1.0.0"),
+                                ("@enter(fw1[ge-0/0/1.0])", "203.0.113.2", "10.1.0.5"),
+                                ("@enter(fw2[ethernet1/2])", "198.51.100.2", "10.11.0.5")):
+            print(f"\n--- DIAG: traceroute {start} {src}->{dst} tcp/80 ---")
+            try:
+                fr = bf.q.traceroute(startLocation=start, headers=HeaderConstraints(
+                    srcIps=src, dstIps=dst, ipProtocols=["TCP"], dstPorts="80")
+                ).answer(snapshot=snap).frame()
+                for _, row in fr.iterrows():
+                    for t in row["Traces"]:
+                        print(str(t)[:2500])
+            except Exception as exc:  # noqa: BLE001
+                print("traceroute failed:", exc)
+        for node, iface, dst in (("fw1", "ge-0/0/1.0", "10.1.0.0/24"),
+                                 ("fw2", "ethernet1/2", "10.11.0.0/24")):
+            print(f"\n--- DIAG: reachability SUCCESS {node}[{iface}] -> {dst} ---")
+            try:
+                fr = bf.q.reachability(
+                    pathConstraints=PathConstraints(startLocation=f"@enter({node}[{iface}])"),
+                    headers=HeaderConstraints(dstIps=dst, ipProtocols=["TCP"]),
+                    actions="SUCCESS").answer(snapshot=snap).frame()
+                for _, row in fr.head(3).iterrows():
+                    print("FLOW", row["Flow"])
+                    print(str(row["Traces"][0])[:2500])
+            except Exception as exc:  # noqa: BLE001
+                print("reachability failed:", exc)
 
 
 if __name__ == "__main__":
