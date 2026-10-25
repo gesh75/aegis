@@ -65,6 +65,13 @@ because a typo must never silently turn into "no check ran".
 ]}
 ```
 
+`firewall_policy` judges **transit** traffic: a flow counts as succeeding only if it is
+DELIVERED_TO_SUBNET or EXITS_NETWORK. Traffic addressed to the firewall's own interface IPs
+(management/control plane) is accepted by the device and never crosses a zone policy. To
+assert that exposure, write a `reachability` intent with `dst_ips` = the firewall's
+addresses. This was found against real Batfish: SRX and PAN-OS both deny untrust→trust
+transit, but accept a SYN to their own trust-side IP.
+
 `to_zone` must exist on the node, otherwise the intent is an error. The egress path itself
 is decided by routing toward `dst_ips`, so a deny intent fails on a leak through **any**
 path, which is the conservative reading. Palo Alto zone names match with or without

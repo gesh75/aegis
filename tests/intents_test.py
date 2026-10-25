@@ -66,7 +66,8 @@ class Fixture:
         if self.boom:
             raise OracleError("engine down")
         self.starts.append(start)
-        return self.success if action == "SUCCESS" else self.failure
+        self.actions = getattr(self, "actions", []) + [action]
+        return self.failure if action == "FAILURE" else self.success
 
     def zone_interfaces(self, node, zone):
         return list(self.zones.get((node, zone), []))
@@ -326,6 +327,8 @@ def firewall() -> None:
           json.dumps(r))
     check("I12.start_from_zone", fx.starts and fx.starts[0] == "@enter(fw1[ge-0/0/1.0])",
           str(fx.starts))
+    check("I12.transit_dispositions_only",
+          fx.actions[0] == "DELIVERED_TO_SUBNET,EXITS_NETWORK", str(fx.actions))
     r = check_intents(ints, candidate=Fixture(zones=ZONES), engine="fixture")["results"][0]
     check("I12.deny_clean_passes", r["status"] == "pass", json.dumps(r))
     r = check_intents(parse_intents([dict(FW, from_zone="untrsut")]),
