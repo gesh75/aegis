@@ -7,7 +7,7 @@
   "required": ["bundle_version", "run_id", "created_utc", "change", "twin",
                "validation", "verdict", "integrity"],
   "properties": {
-    "bundle_version": { "enum": ["1.2", "1.3"] },
+    "bundle_version": { "enum": ["1.2", "1.3", "1.4"] },
     "run_id":         { "type": "string", "minLength": 8 },
     "created_utc":    { "type": "string", "format": "date-time" },
     "operator":       { "type": "string" },
@@ -123,6 +123,39 @@
       "additionalProperties": false,
       "required": ["batfish", "state_diff", "blast_radius", "compliance"],
       "properties": {
+        "intents": {
+          "description": "v1.4: declarative intent checks evaluated before (reference) and after (candidate). null = none requested. Any fail or error blocks the verdict.",
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["engine", "results", "failed", "errors", "regressions"],
+          "properties": {
+            "engine":      { "type": "string" },
+            "snapshot":    { "type": "object" },
+            "fidelity":    { "type": ["object", "null"] },
+            "failed":      { "type": "integer", "minimum": 0 },
+            "errors":      { "type": "integer", "minimum": 0 },
+            "regressions": { "type": "integer", "minimum": 0 },
+            "results": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id", "kind", "expect", "status", "evidence", "examples", "before"],
+                "properties": {
+                  "id":         { "type": "string" },
+                  "kind":       { "enum": ["reachability", "bgp_sessions", "undefined_references", "filter_line_reachability"] },
+                  "expect":     { "type": "string" },
+                  "status":     { "enum": ["pass", "fail", "error"] },
+                  "before":     { "enum": ["pass", "fail", "error", null] },
+                  "regression": { "type": "boolean" },
+                  "evidence":   { "type": "string" },
+                  "examples":   { "type": "array", "items": { "type": "string" } },
+                  "control":    { "type": "string" }
+                }
+              }
+            }
+          }
+        },
         "batfish": {
           "type": "object",
           "additionalProperties": false,

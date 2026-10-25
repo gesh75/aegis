@@ -12,7 +12,8 @@
 
 
 > **Air-gapped Evidence-Grade Inspection System** — preflight network changes against a
-> *real* digital twin, entirely inside your perimeter. No cloud. No data egress. Ever.
+> digital twin (containerlab live tier / simulator community tier), entirely inside your perimeter. Air-gapped by default:
+> no cloud backend and no non-loopback model URL unless an operator sets `AEGIS_AIRGAP=0`.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![tests](https://github.com/gesh75/aegis/actions/workflows/test.yml/badge.svg)](https://github.com/gesh75/aegis/actions/workflows/test.yml)
@@ -21,11 +22,27 @@
 [![status](https://img.shields.io/badge/status-v0.2.0-8a5cf6.svg)](docs/PHASES.md)
 [![phase](https://img.shields.io/badge/phase-2_closed-2ea44f.svg)](docs/PHASES.md)
 
-The air-gapped, self-hosted answer to Forward Predict / NetPilot: those are
-cloud-by-architecture, so regulated networks that legally cannot send topology/config
-off-prem are locked out of them. AEGIS runs the same **change → twin → validate → evidence**
-loop on a self-hosted LLM + containerlab, and emits a tamper-evident, framework-mapped,
-examiner-ready evidence bundle.
+The open-source **evidence and governance layer for network change**, including changes
+proposed by AI agents.
+
+AEGIS runs a **change → twin → validate → evidence** loop inside your perimeter, on a
+self-hosted LLM. The twin is a real containerlab topology in the **live tier**; the open
+**community tier** runs a deterministic simulator. Air-gap is the **default**: the LLM
+layer refuses cloud backends and non-loopback model URLs unless an operator explicitly sets
+`AEGIS_AIRGAP=0`.
+
+It emits a bundle an auditor can verify **offline with a public key**: an Ed25519 seal over
+the evidence, the proposing model's identity and the autonomy bound. Promotion is gated by
+separation of duties and single-use approvals. A hash-chained ledger records:
+
+- every preflight decision, including guard rejections;
+- every approval mint and mint denial;
+- every promotion and promotion denial.
+
+Commercial platforms (Forward, IP Fabric, NetBrain) go deeper on network modelling.
+Forward Enterprise documents on-prem deployment, and NetPilot *says* it offers an air-gapped
+option (an unverified vendor claim). AEGIS complements them; it does not replace them. See
+[`docs/STRATEGY_2026-10.md`](docs/STRATEGY_2026-10.md) §3.
 
 ![AEGIS architecture](docs/architecture.svg)
 
@@ -58,12 +75,18 @@ authorizes, and the sealed bundle proves nothing left the perimeter.
 
 ## Why it's different
 
-| | Forward Predict | NetPilot | **AEGIS** |
+Vendor facts are as published on 2026-10-23. "?" means not found in the vendor's public
+material, which is not proof of absence. Sources are in `docs/STRATEGY_2026-10.md` §3.8.
+
+| | Forward Enterprise + Predict | NetPilot | **AEGIS** |
 |---|---|---|---|
-| Twin | math model | cloud emulation | **real on-host emulation (containerlab)** |
-| Hosting | SaaS | cloud | **on-prem / air-gapped** |
-| LLM | cloud | cloud | **self-hosted (zero egress)** |
-| Output | report | — | **sealed, PCI/SOC2/NIST-mapped evidence + PDF** |
+| Twin | mathematical model (Predict GA 2026-09-29) | real NOS containers | **containerlab emulation** (live tier) / simulator (community) |
+| Hosting | Enterprise: on-prem or SaaS (documented); **Predict on-prem parity: ?** | cloud; on-prem / air-gapped via sales (vendor claim; its pricing page conflicts) | **on-prem / air-gapped by default, open source** |
+| LLM | Forward AI (hosting model: ?) | local LLM on-prem (vendor claim) | **self-hosted, loopback-enforced by default** (`AEGIS_AIRGAP=0` opts out) |
+| Reachability / ACL analysis | **yes** | in-lab | **yes, via in-perimeter Batfish intents** (before/after differential, [`docs/INTENTS.md`](docs/INTENTS.md)) |
+| Evidence an auditor verifies offline | ? | ? | **Ed25519-sealed bundle + `aegis.verify`** |
+| Approval: SoD + single-use, bound to config | ? | ? | **yes, plus hash-chained ledger** |
+| Output | reports / API | pre/post diff | **sealed, 11-framework evidence + PDF / CAB / AEGIS-shaped OSCAL AR (not schema-validated)** |
 
 ## 🏛️ Architecture
 
@@ -170,7 +193,9 @@ see [`SECURITY.md`](SECURITY.md).
 | OSCAL AR + CAB export | integrity-gated JSON | yes |
 | compliance frameworks | per-module `SELF_TEST` (incl. Junos set + `{}` form) | yes |
 | seal / authority / ceiling / LLM egress / wedge | property suites | yes |
-| hardening (G0 seal, SoD, replay, ledger, prod mode, CLI) | 53 checks | yes |
+| hardening (G0 seal, SoD, replay, ledger + rejections, SIEM anchor, peer-AS policy, CSP, air-gap default, prod mode, CLI) | 73 checks | yes |
+| intent engine (spec, differential, fidelity gate, fail-closed) | 51 checks, fixture oracle | yes |
+| **live Batfish** intents (real `batfish/allinone`) | Cisco ACL regression fixture | yes (`batfish` job) |
 | Bandit SAST · pip-audit · container smoke | gate on HIGH / any CVE / non-root | yes |
 
 See [`docs/DEVELOPER.md`](docs/DEVELOPER.md). Strategy, competitor analysis and roadmap:
@@ -189,6 +214,7 @@ core/runtime.py      community vs production (fail-closed) mode
 evidence/            bundler · sha256 integrity · OSCAL AR · CAB · 11-framework crosswalk · PDF
 evidence/ledger.py   append-only hash-chained audit ledger
 evidence/secrets.py  vendor-aware secret detection + redaction · evidence/junos.py {}→set
+core/intents/        Batfish intent checks: reachability / ACL / BGP / refs, before→after
 verify.py            offline auditor CLI (integrity + seal + ledger)
 ui/                  self-contained PreFlight dashboard
 serve.py             standalone community server (sim tier)

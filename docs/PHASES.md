@@ -26,6 +26,17 @@ self-hosted LLM + audit-grade evidence**. That is exactly the shape of our stack
 Docker Model Runner = zero egress; clab = real convergence; 52k corpus = config grounding;
 compliance scanner = evidence engine).
 
+> **Update 2026-10-23 (re-verified, see `docs/STRATEGY_2026-10.md` §3).** The
+> "cloud-by-architecture" premise no longer holds:
+>
+> - Forward Enterprise documents on-prem deployment (OVA / Forward Cluster).
+> - Forward Predict went GA on 2026-09-29.
+> - NetPilot now offers an on-prem, air-gapped option with a local LLM (vendor claim).
+>
+> The defensible position moved to **offline-verifiable evidence + governance (SoD,
+> single-use approvals, sealed model identity and autonomy bound) + open source**. Air-gap
+> is now table stakes. This entry is kept as the original dated record.
+
 **Decision:** do NOT build PreFlight. Build the air-gapped version Forward/NetPilot
 architecturally cannot follow us into. Working codename **AEGIS** (Air-gapped Evidence-Grade
 Inspection System). Target buyer #1: regulated finance / telco NOC.

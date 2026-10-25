@@ -5,6 +5,58 @@ versioning is [SemVer](https://semver.org).
 
 ## [Unreleased]
 
+### Security: review findings on PR #40
+- **Air-gap is now the default (high).** The cloud fallback and non-loopback model URLs used
+  to be allowed unless `AEGIS_AIRGAP=1` was set. Now only an explicit `AEGIS_AIRGAP=0` opts
+  out, and a missing or mistyped value stays air-gapped. `HttpBackend.generate_config`,
+  which calls the model runner directly, now enforces the same loopback check.
+- **Rejected preflights are ledgered.** Every guard and pipeline rejection appends
+  `preflight_rejected` (stage and reason only, never the configs). Denied mints append
+  `approval_mint_denied`. A non-object JSON body is a 400, not a 500.
+- Docs qualified:
+  - the twin is containerlab in the live tier and a simulator in the community tier;
+  - the OSCAL export is "AEGIS-shaped, not schema-validated";
+  - Forward's on-prem deployment applies to Enterprise, and Predict's parity is unknown;
+  - NetPilot's air-gap option is a vendor claim;
+  - ingesting IP Fabric or Forward results is proposed, not built.
+
+### Intent checks via Batfish: reachability, ACL, BGP, references (bundle v1.4)
+Closes the biggest gap from the strategy doc, G1 (reachability and ACL analysis).
+
+- `core/intents/`: a declarative intent spec in JSON or YAML. Unknown kinds or fields are
+  rejected. The fail-closed evaluator runs a **before/after differential** against a
+  reference snapshot and flags regressions. A parse-fidelity gate turns every intent into
+  `error` when the candidate doesn't parse. A vacuous `allow` (no matching flow) is an
+  error, not a pass.
+- Snapshot materialization: Junos `set` deltas are merged onto the base config, other
+  vendors need a full-config replacement, and file names are sanitized.
+- A pybatfish oracle runs against an in-perimeter `batfish/allinone` (optional
+  `requirements-batfish.txt`). Snapshots are uploaded under unique names and deleted.
+- Pipeline: a failed or un-evaluable intent sets the verdict to `blocked`, with risk and
+  severity treated like a static-analysis error. Results are sealed under
+  `validation.intents` (schema **v1.4**).
+- API: `intents` in `POST /api/preflight/run`, and an org baseline via
+  `AEGIS_INTENTS_PATH` (invalid means the server refuses to start). `/api/status` reports
+  the engine. New metric: `aegis_intent_results_total{status}`.
+- Evidence: the PDF has an intent table (before → after, control, example flows), and
+  CAB and OSCAL include intent observations and findings. The UI shows intent chips.
+- Tests: `intents_test` (51 checks, fixture oracle) and a **new CI job `batfish`** running
+  `batfish_live_test` against a real `batfish/allinone`.
+- Docs: `docs/INTENTS.md`.
+
+### Docs: competitive landscape and positioning correction (2026-10-23)
+- `docs/STRATEGY_2026-10.md` §3 adds a sourced market map (12 vendors and categories), two
+  capability matrices (assurance depth; governance and evidence), ranked gaps and
+  advantages, market signals, a recommendation (AEGIS + Batfish pilot) and RFP questions.
+  Every claim carries a Confirmed / Inferred / Unknown label.
+- **Positioning corrected.** README and Pages no longer say Forward and NetPilot are
+  "cloud-by-architecture". Forward Enterprise documents on-prem deployment (Predict's
+  on-prem parity is unknown), Forward Predict went GA on 2026-09-29, and NetPilot *claims*
+  an air-gapped option (vendor claim, partly contradicted by its pricing page). AEGIS is now positioned as
+  the open-source, offline-verifiable evidence and governance layer.
+  `docs/PHASES.md` is annotated, not rewritten. The older launch copy is flagged in the
+  strategy doc (§8).
+
 ### 2026-10 security & product audit (bundle v1.3)
 
 Driven by a cross-session audit: the earlier review's findings A1–A10, re-checked against the code, plus new

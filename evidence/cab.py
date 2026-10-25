@@ -26,6 +26,20 @@ def _rollback_steps(bundle: dict) -> list:
     return []
 
 
+def _intents_summary(bundle: dict) -> dict | None:
+    ir = (bundle.get("validation") or {}).get("intents")
+    if not isinstance(ir, dict):
+        return None
+    return {
+        "engine": ir.get("engine"),
+        "failed": ir.get("failed"), "errors": ir.get("errors"),
+        "regressions": ir.get("regressions"),
+        "rows": [{"id": r.get("id"), "before": r.get("before"), "after": r.get("status"),
+                  "control": r.get("control"), "evidence": r.get("evidence")}
+                 for r in (ir.get("results") or [])],
+    }
+
+
 def to_cab(bundle: dict, authenticity: str | None = None) -> dict:
     """Pure function. Does not verify the bundle — callers must bundler.verify first.
     ``authenticity`` is the caller's seal verdict, copied verbatim into the packet."""
@@ -71,6 +85,7 @@ def to_cab(bundle: dict, authenticity: str | None = None) -> dict:
             "honesty": "plan generated; reversal was not executed in this run",
         },
         "compliance_fails": fails,
+        "intents": _intents_summary(bundle),
         "verdict": verdict,
         "authority": change.get("authority"),
         "risk_tier": change.get("risk_tier"),
