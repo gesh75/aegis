@@ -51,6 +51,7 @@ from ..evidence.pdf import render_pdf
 FAILS: list[str] = []
 CHECKS = 0
 KEY = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+API = "hardening-api-key"
 
 
 def check(name: str, cond: bool, detail: str = "") -> None:
@@ -289,26 +290,29 @@ def http_contract() -> None:
     # H7 — approver registry + SoD at mint
     key_bob = "bob-personal-credential-123456"
     os.environ["AEGIS_APPROVE_KEY"] = KEY
+    os.environ["AEGIS_API_KEY"] = API  # HMAC minting is refused on an unauthenticated server
     os.environ["AEGIS_APPROVER_KEYS"] = "bob:" + hashlib.sha256(key_bob.encode()).hexdigest()
     try:
-        r = c.post("/api/approve/mint", json={"approver": "bob", "bundle": bundle})
+        r = c.post("/api/approve/mint", json={"approver": "bob", "bundle": bundle},
+                   headers={"X-Aegis-Key": API})
         check("H7.mint_needs_credential", r.status_code == 401, str(r.status_code))
         r = c.post("/api/approve/mint", json={"approver": "carol", "bundle": bundle},
-                   headers={"X-Aegis-Approver-Key": key_bob})
+                   headers={"X-Aegis-Key": API, "X-Aegis-Approver-Key": key_bob})
         check("H7.body_identity_mismatch", r.status_code == 403, str(r.status_code))
         r = c.post("/api/approve/mint", json={"bundle": bundle},
-                   headers={"X-Aegis-Approver-Key": key_bob})
+                   headers={"X-Aegis-Key": API, "X-Aegis-Approver-Key": key_bob})
         check("H7.identity_from_credential", r.status_code == 200
               and (r.get_json() or {}).get("approver") == "bob",
               f"{r.status_code} {r.get_data(as_text=True)[:160]}")
         os.environ["AEGIS_APPROVER_KEYS"] += ",alice:" + hashlib.sha256(b"alice-cred-0000000000").hexdigest()
         r = c.post("/api/approve/mint", json={"bundle": bundle},
-                   headers={"X-Aegis-Approver-Key": "alice-cred-0000000000"})
+                   headers={"X-Aegis-Key": API, "X-Aegis-Approver-Key": "alice-cred-0000000000"})
         check("H3.mint_sod_403", r.status_code == 403
               and "separation of duties" in r.get_data(as_text=True), r.get_data(as_text=True)[:160])
     finally:
         os.environ.pop("AEGIS_APPROVE_KEY", None)
         os.environ.pop("AEGIS_APPROVER_KEYS", None)
+        os.environ.pop("AEGIS_API_KEY", None)
 
     # H9 — ops endpoints
     r = c.get("/healthz")
@@ -468,14 +472,17 @@ def rejections_ledgered() -> None:
     check("H14.non_object_body_no_500", r.status_code in (400, 200), str(r.status_code))
     os.environ["AEGIS_APPROVE_KEY"] = KEY
     os.environ["AEGIS_APPROVER_KEYS"] = "bob:" + hashlib.sha256(b"bob-cred-0000000000").hexdigest()
+    os.environ["AEGIS_API_KEY"] = API
     try:
         before = _LEDGER.head()["seq"]
-        c.post("/api/approve/mint", json={"approver": "bob", "bundle_sha256": "a" * 64})
+        c.post("/api/approve/mint", json={"approver": "bob", "bundle_sha256": "a" * 64},
+               headers={"X-Aegis-Key": API})
         kinds = [e["kind"] for e in _LEDGER.entries()[before:]]
         check("H14.mint_denial_ledgered", "approval_mint_denied" in kinds, str(kinds))
     finally:
         os.environ.pop("AEGIS_APPROVE_KEY", None)
         os.environ.pop("AEGIS_APPROVER_KEYS", None)
+        os.environ.pop("AEGIS_API_KEY", None)
 
 
 def main() -> int:

@@ -27,6 +27,7 @@ from __future__ import annotations
 import os
 import sys
 
+from .. import serve
 from ..serve import app
 
 FAILS: list[str] = []
@@ -192,7 +193,23 @@ def main() -> int:
     # 20 — HMAC mint + promote (keyed)
     os.environ["AEGIS_APPROVE_KEY"] = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
     try:
-        r = c.post("/api/approve/mint",
+        # 20a — HMAC minting on an unauthenticated server is refused (startup + request time)
+        r = c.post("/api/approve/mint", json={"approver": "noc-lead", "bundle_sha256": sha})
+        check("mint.no_api_key.503", r.status_code == 503
+              and "AEGIS_API_KEY" in r.get_data(as_text=True), str(r.status_code))
+        try:
+            serve._require_api_key_for_hmac()
+            check("startup.hmac_without_api_key.refused", False, "no SystemExit")
+        except SystemExit as exc:
+            check("startup.hmac_without_api_key.refused", "AEGIS_API_KEY" in str(exc), str(exc))
+        os.environ["AEGIS_API_KEY"] = "ci-test-key"
+        auth = {"X-Aegis-Key": "ci-test-key"}
+
+        def post(url, **kw):
+            return c.post(url, headers=auth, **kw)
+
+        serve._require_api_key_for_hmac()  # both keys set: must not raise
+        r = post("/api/approve/mint",
                    json={"approver": "noc-lead", "bundle_sha256": sha, "ttl_sec": 600})
         check("mint.keyed.200", r.status_code == 200, f"{r.status_code} {r.get_data(as_text=True)[:160]}")
         minted_body = r.get_json() or {}
@@ -201,7 +218,7 @@ def main() -> int:
               str(minted)[:40])
         check("mint.keyed.v1", minted_body.get("version") == 1, str(minted_body.get("version")))
         if bundle:
-            r = c.post("/api/preflight/promote",
+            r = post("/api/preflight/promote",
                        json={"bundle": bundle, "approver": "noc-lead",
                              "approval_token": "tok-123", "connector": "dry_run"})
             tier = (bundle.get("change") or {}).get("risk_tier")
@@ -210,7 +227,7 @@ def main() -> int:
             if needs:
                 check("promote.hmac.random.403", r.status_code == 403, str(r.status_code))
             if minted:
-                r = c.post("/api/preflight/promote",
+                r = post("/api/preflight/promote",
                            json={"bundle": bundle, "approver": "noc-lead",
                                  "approval_token": minted, "connector": "dry_run"})
                 if decision == "blocked":
@@ -223,7 +240,7 @@ def main() -> int:
                           (rec.get("approval") or {}).get("method") == "hmac-sha256",
                           str(rec.get("approval")))
         if bundle:
-            r = c.post("/api/approve/mint",
+            r = post("/api/approve/mint",
                        json={"approver": "noc-lead", "bundle": bundle, "ttl_sec": 600})
             check("mint.v2.bundle.200", r.status_code == 200,
                   f"{r.status_code} {r.get_data(as_text=True)[:160]}")
@@ -238,11 +255,11 @@ def main() -> int:
                   str(tok_v2)[:40])
             tampered = dict(bundle)
             tampered["change"] = dict(bundle.get("change") or {}, risk_tier="low")
-            r = c.post("/api/approve/mint",
+            r = post("/api/approve/mint",
                        json={"approver": "noc-lead", "bundle": tampered, "ttl_sec": 600})
             check("mint.v2.tampered.422", r.status_code == 422, str(r.status_code))
             if tok_v2:
-                r = c.post("/api/preflight/promote",
+                r = post("/api/preflight/promote",
                            json={"bundle": bundle, "approver": "noc-lead",
                                  "approval_token": tok_v2, "connector": "dry_run"})
                 decision = (bundle.get("verdict") or {}).get("decision")
@@ -255,7 +272,7 @@ def main() -> int:
                     check("promote.v2.bound.method",
                           (rec.get("approval") or {}).get("method") == "hmac-sha256",
                           str(rec.get("approval")))
-                r = c.post("/api/preflight/promote",
+                r = post("/api/preflight/promote",
                            json={"bundle": bundle, "approver": "noc-lead",
                                  "approval_token": tok_v2, "connector": "dry_run",
                                  "inventory_sha256": "ff" * 32})
@@ -268,6 +285,7 @@ def main() -> int:
                           r.get_data(as_text=True)[:160])
     finally:
         os.environ.pop("AEGIS_APPROVE_KEY", None)
+        os.environ.pop("AEGIS_API_KEY", None)
 
     if FAILS:
         print("\n=== API ENDPOINT TEST: FAIL ===")

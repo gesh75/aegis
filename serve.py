@@ -111,6 +111,19 @@ runtime.assert_startup_ok()  # production refuses to start with any control unse
 _SIGNER = _load_signer()
 _VERIFIER: Ed25519Verifier = _SIGNER.verifier()
 load_approve_key()  # SystemExit if AEGIS_APPROVE_KEY is set but unusable
+
+
+def _require_api_key_for_hmac() -> None:
+    """Same rule as the pinned seal key: an unauthenticated server must never mint
+    HMAC approvals, or anyone who can reach it could approve their own change."""
+    if hmac_configured() and not _api_key():
+        raise SystemExit(
+            "[aegis.auth] AEGIS_APPROVE_KEY is set but AEGIS_API_KEY is unset; "
+            "refusing to mint HMAC approvals on an unauthenticated server"
+        )
+
+
+_require_api_key_for_hmac()
 approvers.load_registry()  # SystemExit if AEGIS_APPROVER_KEYS is malformed
 _LEDGER = Ledger(os.environ.get("AEGIS_LEDGER_PATH") or None, sink=sink_from_env())
 
@@ -437,6 +450,10 @@ def approve_mint():
     if not hmac_configured():
         return jsonify({"error": "AEGIS_APPROVE_KEY is unset — HMAC minting refused "
                                  "(asserted-unverified mode)"}), 503
+    if not _api_key():  # env changed after startup — still never mint unauthenticated
+        return jsonify({"error": "AEGIS_APPROVE_KEY is set but AEGIS_API_KEY is unset — "
+                                 "refusing to mint HMAC approvals on an unauthenticated "
+                                 "server"}), 503
     data = request.get_json(silent=True) or {}
     bundle = data.get("bundle")
     who = data.get("approver") if isinstance(data.get("approver"), str) else ""

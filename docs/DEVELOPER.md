@@ -20,7 +20,7 @@ Companion pages: [ARCHITECTURE.md](ARCHITECTURE.md) (maps) · [GO_LIVE.md](GO_LI
 | `AEGIS_MAX_AUTHORIZED_TIER` | `core/risk/authority.py` | `AUTO` \| `HITL` \| `HOTL`. Default `HOTL`. `BLOCK` and unknown values **raise**. |
 | `AEGIS_SEAL_KEY` | `serve.py` | 64 hex chars = pinned Ed25519 seed. Unset = ephemeral demo key. Invalid = `SystemExit`. Pinned key **requires** `AEGIS_API_KEY` (T1 #10). |
 | `AEGIS_API_KEY` | `serve.py` | When set, mutating routes require header `X-Aegis-Key`. Custom header also breaks trivial CSRF POSTs. |
-| `AEGIS_APPROVE_KEY` | `core/promote/tokens.py` | HMAC-SHA256 key for G2/G3 tokens. Hex (≥32 chars) or raw (≥16 bytes). Unset = asserted-unverified. Set-but-too-short = `SystemExit`. |
+| `AEGIS_APPROVE_KEY` | `core/promote/tokens.py` | HMAC-SHA256 key for G2/G3 tokens. Hex (≥32 chars) or raw (≥16 bytes). Unset = asserted-unverified. Set-but-too-short = `SystemExit`. Set **requires** `AEGIS_API_KEY` (startup `SystemExit`; mint 503). |
 | `AEGIS_PROMOTE_ALLOW_LIVE=1` | `core/promote/gate.py` G4 | Required in addition to a live connector. |
 | `AEGIS_HOST` / `AEGIS_PORT` | `serve.py` | Bind address (default `127.0.0.1:8088`). |
 
@@ -144,6 +144,38 @@ The seal (`core/seal/seal.py`) additionally refuses to certify an unbounded chan
 | POST | `/api/seal/verify` | Body `{bundle, seal}` (public). |
 
 CSP is loopback-oriented; `MAX_CONTENT_LENGTH` is 2 MB.
+
+### Runbook: run → mint → promote (HMAC mode)
+
+Server prerequisites: `AEGIS_API_KEY` **and** `AEGIS_APPROVE_KEY`. If the HMAC key is set
+but the API key is not, the server refuses to start. If the API key is removed while the
+server is running, mint returns **503**. Approvals are never minted on an unauthenticated
+server. With `AEGIS_APPROVER_KEYS` set, each approver authenticates with their own
+credential.
+
+```bash
+H=(-H "Content-Type: application/json" -H "X-Aegis-Key: $AEGIS_API_KEY")
+# 1. operator runs the preflight; the response IS the sealed bundle (seal under .seal)
+curl -s "${H[@]}" -d '{"intent":"add vlan 10 to leaf-1","operator":"alice","change_ref":"CHG0001234"}' \
+  http://127.0.0.1:8088/api/preflight/run > bundle.json
+# 2. a DIFFERENT person mints a v2 token bound to that bundle's config + inventory
+jq '{bundle: .}' bundle.json | curl -s "${H[@]}" -H "X-Aegis-Approver-Key: $MY_APPROVER_CRED" \
+  -d @- http://127.0.0.1:8088/api/approve/mint > token.json
+# 3. promote (dry_run connector by default)
+jq -n --slurpfile b bundle.json --slurpfile t token.json \
+  '{bundle: $b[0], approver: $t[0].approver, approval_token: $t[0].token}' \
+  | curl -s "${H[@]}" -d @- http://127.0.0.1:8088/api/preflight/promote
+```
+
+| Response | Meaning | Fix |
+|---|---|---|
+| mint **401** | Missing or unknown `X-Aegis-Approver-Key`. The denial is ledgered. | The approver uses their own credential. |
+| mint **403** "separation of duties" | The approver is the bundle's `operator`. | A second person approves. |
+| mint **422** | The bundle was edited after the run (sha256 mismatch). | Re-run the preflight. |
+| mint **503** | The HMAC key is unset, or the API key is unset. | Set both keys. |
+| promote **403** G0 | The seal is missing, foreign, or mismatched. | Use the bundle exactly as `/run` returned it. |
+| promote **403** "already used" | Single-use token replay. | Mint a new token. |
+| promote **403** inventory | The live `inventory_sha256` differs from the one the token was bound to. | Re-run against the current inventory. |
 
 ---
 
