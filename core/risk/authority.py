@@ -103,10 +103,21 @@ _SPINE_NAME_RE = re.compile(r"\bspine\b", re.IGNORECASE)
 _UNDERLAY_NAME_RE = re.compile(r"\b(?:underlay|super-?spine)\b", re.IGNORECASE)
 
 
-def classify_change(configs: list[GeneratedConfig]) -> ChangeClass:
-    """Classify candidate configs into fabric-construct flags (the hard-force triggers)."""
+def classify_change(configs: list[GeneratedConfig],
+                    roles: dict[str, str] | None = None) -> ChangeClass:
+    """Classify candidate configs into fabric-construct flags (the hard-force triggers).
+
+    ``roles`` ({device: role slug}, e.g. from NetBox) can only ADD spine/underlay flags on
+    top of the name/protocol heuristic, never clear one, so a source-of-truth gap can only
+    make the result stricter."""
     text = "\n".join(c.get("config", "") for c in configs)
     names = " ".join(c.get("device", "") for c in configs)
+    role_spine = role_underlay = False
+    if roles:
+        from ..integrations.netbox import spine_roles, underlay_roles
+        dev_roles = {str(roles.get(c.get("device", "")) or "").lower() for c in configs}
+        role_spine = bool(dev_roles & spine_roles())
+        role_underlay = bool(dev_roles & underlay_roles())
     if peer_as_policy() == "hitl":
         asn = bool(_LOCAL_ASN_RE.search(text))
         peer = bool(_PEER_ASN_RE.search(text))
@@ -116,8 +127,9 @@ def classify_change(configs: list[GeneratedConfig]) -> ChangeClass:
         touches_asn=asn,
         touches_peer_as=peer,
         touches_rd_rt=bool(_RD_RT_RE.search(text)),
-        touches_spine=bool(_SPINE_NAME_RE.search(names)),
-        touches_underlay=bool(_UNDERLAY_NAME_RE.search(names) or _UNDERLAY_CONFIG_RE.search(text)),
+        touches_spine=bool(_SPINE_NAME_RE.search(names)) or role_spine,
+        touches_underlay=bool(_UNDERLAY_NAME_RE.search(names) or _UNDERLAY_CONFIG_RE.search(text))
+        or role_underlay,
     )
 
 

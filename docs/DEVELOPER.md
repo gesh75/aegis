@@ -21,6 +21,9 @@ Companion pages: [ARCHITECTURE.md](ARCHITECTURE.md) (maps) · [GO_LIVE.md](GO_LI
 | `AEGIS_SEAL_KEY` | `serve.py` | 64 hex chars = pinned Ed25519 seed. Unset = ephemeral demo key. Invalid = `SystemExit`. Pinned key **requires** `AEGIS_API_KEY` (T1 #10). |
 | `AEGIS_API_KEY` | `serve.py` | When set, mutating routes require header `X-Aegis-Key`. Custom header also breaks trivial CSRF POSTs. |
 | `AEGIS_APPROVE_KEY` | `core/promote/tokens.py` | HMAC-SHA256 key for G2/G3 tokens. Hex (≥32 chars) or raw (≥16 bytes). Unset = asserted-unverified. Set-but-too-short = `SystemExit`. Set **requires** `AEGIS_API_KEY` (startup `SystemExit`; mint 503). |
+| `AEGIS_INTEGRATION_HOSTS` | `core/integrations/__init__.py` | Hosts declared in-perimeter for ServiceNow / NetBox while air-gap is on. Exact hostnames, comma-separated. |
+| `AEGIS_SNOW_*`, `AEGIS_NETBOX_*` | `core/integrations/` | See `docs/INTEGRATIONS.md`. |
+| `AEGIS_REVERSIBLE_SECRETS` | `evidence/secrets.py` | `fail` (default, D2) or `report`: whether type 7 / `$9$` fail PCI 8.3.2. Invalid = startup `SystemExit`. |
 | `AEGIS_PROMOTE_ALLOW_LIVE=1` | `core/promote/gate.py` G4 | Required in addition to a live connector. |
 | `AEGIS_HOST` / `AEGIS_PORT` | `serve.py` | Bind address (default `127.0.0.1:8088`). |
 
@@ -141,6 +144,8 @@ The seal (`core/seal/seal.py`) additionally refuses to certify an unbounded chan
 | POST | `/api/preflight/evidence/cab` | CAB one-pager. Rollback is a plan, not a verified execution. |
 | POST | `/api/approve/mint` | HMAC token. Body `{bundle}` → **v2** (config + inventory). Hash-only → **v1**. Tampered bundle → **422**. **503** if HMAC unset. |
 | POST | `/api/preflight/promote` | Gate G0–G5 + SoD + single-use, then dry-run (default). Optional `inventory_sha256` live override. **403** on deny. |
+| POST | `/api/integrations/servicenow/sync` | Sealed bundle → verdict + redacted PDF attached to its CHG; blocked → on hold. Needs `AEGIS_API_KEY` + `AEGIS_SNOW_URL` (**503** otherwise). See `docs/INTEGRATIONS.md`. |
+| POST | `/api/postchange/verify` | `{bundle, running_configs, intents?}` → verified / drift / failed / unverifiable. Bundle must carry this server's seal (**422**). |
 | GET | `/api/seal/pubkey` | Offline verify material (public). |
 | POST | `/api/seal/verify` | Body `{bundle, seal}` (public). |
 

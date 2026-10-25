@@ -26,7 +26,7 @@ jobs:
       - name: Install deps
         run: pip install -r aegis/requirements-dev.txt
 
-      # run from the workspace root (the parent of aegis/) — 16 suites, 0 violations
+      # run from the workspace root (the parent of aegis/) — 17 suites, 0 violations
       - name: Pipeline invariants (25k, 8 invariants, adversarial + concurrency)
         run: python -m aegis.tests.stress_test 25000
 
@@ -75,6 +75,9 @@ jobs:
 
       - name: Intent engine (spec, differential, fidelity gate, fail-closed; fixture oracle)
         run: python -m aegis.tests.intents_test
+
+      - name: Integrations (ServiceNow, NetBox, post-change verify; mock transport)
+        run: python -m aegis.tests.integrations_test
 
   security:
     runs-on: ubuntu-latest
