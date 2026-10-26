@@ -5,6 +5,71 @@ versioning is [SemVer](https://semver.org).
 
 ## [Unreleased]
 
+### Firewall and NAT intents (Juniper SRX, Palo Alto)
+- `firewall_policy`: zone-to-zone **transit** policy on one firewall. Zones resolve to
+  every `from_zone` interface through Batfish `interfaceProperties`, and an unknown zone
+  is an error.
+- `nat`: one concrete flow is traced. It must be delivered, and its post-NAT
+  source/destination/port must match the intent. Every ECMP trace must agree, and
+  `untranslated` means no header field changes.
+- **Proven against live Batfish in CI** with an SRX set-delta (junos-set-merge) and a
+  PAN-OS full config. Three regressions are caught:
+  - a temporary vendor permit on SRX;
+  - the same permit on PAN-OS;
+  - the web VIP DNAT pool retargeted to `10.2.0.99`.
+
+  SRX and PAN source NAT and trust→untrust HTTPS stay a pass.
+- Found against the real engine: both vendors accept a SYN to the firewall's **own**
+  trust-side IP (control plane), even though transit is denied. `firewall_policy` therefore
+  counts only DELIVERED_TO_SUBNET / EXITS_NETWORK. Exposure of device addresses is asserted
+  with a `reachability` intent instead.
+
+### Integrations: ServiceNow, NetBox, post-change verification (`docs/INTEGRATIONS.md`)
+- Perimeter rule: while air-gap is on, an integration host must be loopback or declared
+  in `AEGIS_INTEGRATION_HOSTS`. Off-loopback connections must use https. No credentials in
+  URLs, no redirects, no environment proxies. `AEGIS_API_KEY` is required.
+- ServiceNow (`POST /api/integrations/servicenow/sync`):
+  - picks one CHG from the **sealed** `change_ref`, and refuses encoded-query injection;
+  - attaches the redacted PDF and a verdict JSON, but never the bundle or the config;
+  - writes a work note and `u_aegis_verdict`;
+  - blocked → `on_hold`;
+  - ledgered as `itsm_synced` / `itsm_sync_failed`.
+- NetBox:
+  - device roles can only **add** spine/underlay authority flags;
+  - `netbox:<sha256>` is sealed as `twin.inventory_rev` (plus `twin.device_roles`) and
+    bound into v2 approval tokens;
+  - production rejects the run if NetBox is unreachable.
+- `POST /api/postchange/verify`:
+  - checks that the sealed lines are present in the running config (Junos set/delete,
+    Cisco line/`no`) and re-runs the intents on the running configs;
+  - status is verified / drift / failed / unverifiable;
+  - needs this server's seal, and is ledgered.
+- `tests/integrations_test.py` (69 checks, `httpx.MockTransport`) is added to CI. Not yet
+  exercised against a live One Call instance.
+
+### Decisions applied (strategy §7)
+- **D1:** `AEGIS_PEER_AS_POLICY` now defaults to `hitl`. A BGP neighbor add needs a
+  second-person approval instead of being BLOCK. The device's own AS, RD and RT stay BLOCK.
+  `=block` restores the old default.
+- **D2:** `AEGIS_REVERSIBLE_SECRETS=fail` (default). Cisco type 7 and Junos `$9$` fail PCI
+  8.3.2, and `=report` restores PASS-with-note. Compliance rows are evidence and do not
+  change the verdict.
+- **Fix:** a Cisco type 9 scrypt hash (`$9$salt$hash`) was misreported as reversible Junos
+  `$9$`.
+- Both policy switches are validated at startup, so a typo is fatal.
+- **D3:** the design is recorded in `docs/DESIGN_D3_SECRET_REFERENCES.md`; not implemented.
+- **D5:** DC fabric is recorded as the pilot domain.
+- **D4:** still open; it needs owner input.
+
+### Review queue
+- Dependabot bumps batched and validated on full CI (supersedes #33–#39):
+  - actions/checkout v7.0.1 and setup-python v7.1.0 (SHA-pinned);
+  - gunicorn 26.2, reportlab 5.0.1, cryptography 50.0.2, httpx 0.28.1, bandit 1.9.4.
+- Ported #28: with `AEGIS_APPROVE_KEY` set but no `AEGIS_API_KEY`, the server refuses to
+  start, and mint returns 503 if the API key disappears at runtime.
+- `docs/DEVELOPER.md` has a run → mint → promote runbook for current behavior. It replaces
+  the outdated text in #29–#31.
+
 ### Security: review findings on PR #40
 - **Air-gap is now the default (high).** The cloud fallback and non-loopback model URLs used
   to be allowed unless `AEGIS_AIRGAP=1` was set. Now only an explicit `AEGIS_AIRGAP=0` opts

@@ -25,6 +25,8 @@ should fail PCI 8.3.2 is a policy decision recorded in docs/STRATEGY_2026-10.md.
 """
 from __future__ import annotations
 
+import os
+
 import re
 
 _F = re.IGNORECASE | re.MULTILINE
@@ -64,7 +66,9 @@ PLAINTEXT_PATTERNS: list[tuple[str, re.Pattern]] = [
 REVERSIBLE_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("cisco-type7",
      re.compile(r"(?<![\w-])(?:password|key|key-string|md5|authentication-key)\s+7\s+(?P<s>\S+)", _F)),
-    ("junos-$9$", re.compile(r'(?P<s>\$9\$[^\s";]+)', _F)),
+    # Junos $9$ never contains a second "$"; Cisco type 9 ($9$salt$hash, scrypt) does and
+    # is a hash, not reversible — it must not be reported (or, under D2, failed) as $9$.
+    ("junos-$9$", re.compile(r'(?P<s>\$9\$[^\s";$]+)(?=$|[\s";])', _F)),
 ]
 
 # Hashes are not reversible but are crackable offline — redact, never report as a fail.
@@ -81,6 +85,16 @@ def plaintext_hits(text: str) -> list[str]:
     """Labels (sorted, unique) of cleartext credentials present. Values never returned."""
     t = text or ""
     return sorted({label for label, rx in PLAINTEXT_PATTERNS if rx.search(t)})
+
+
+def reversible_policy() -> str:
+    """AEGIS_REVERSIBLE_SECRETS (decision D2): ``fail`` (default) — Cisco type 7 and Junos
+    ``$9$`` fail PCI DSS 8.3.2, because they are reversible obfuscation, not strong
+    cryptography; ``report`` — the earlier behavior, PASS with a note. Invalid is fatal."""
+    raw = (os.environ.get("AEGIS_REVERSIBLE_SECRETS") or "fail").strip().lower()
+    if raw not in ("fail", "report"):
+        raise ValueError(f"AEGIS_REVERSIBLE_SECRETS must be fail|report (got {raw!r})")
+    return raw
 
 
 def reversible_hits(text: str) -> list[str]:

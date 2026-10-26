@@ -15,7 +15,8 @@ from .engine import check_intents
 from .snapshot import materialize, read_base
 
 
-def run_intents(intents: list[dict], configs: list[dict]) -> dict:
+def run_intents(intents: list[dict], configs: list[dict], replace: bool = False) -> dict:
+    """``replace=True`` (post-change): configs are complete running configs, never merged."""
     host = (os.environ.get("AEGIS_BATFISH_HOST") or "").strip()
     if not host:
         return check_intents(intents, candidate=None,
@@ -28,7 +29,7 @@ def run_intents(intents: list[dict], configs: list[dict]) -> dict:
                                                 "(pip install -r requirements-batfish.txt)")
     try:
         base = read_base(os.environ.get("AEGIS_BATFISH_SNAPSHOT_DIR") or None)
-        reference, candidate, log = materialize(configs, base)
+        reference, candidate, log = materialize(configs, base, replace=replace)
     except OSError as exc:
         return check_intents(intents, candidate=None,
                              unavailable_reason=f"reference snapshot unreadable: "

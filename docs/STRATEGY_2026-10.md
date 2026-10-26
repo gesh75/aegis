@@ -57,7 +57,7 @@ HITRUST 09.b, and DORA Art. 17 as a benchmark.
 - Only BGP session counts are verified in the twin. There is no reachability, ACL or firewall
   policy analysis, which is where most network security risk lives.
 - There is no post-change verification against production.
-- There is no ServiceNow, NetBox or Batfish-native integration yet.
+- ServiceNow, NetBox and Batfish integrations are built (Batfish is proven live in CI). ServiceNow and NetBox are contract-tested and still need a live instance (2026-10-25).
 
 **Recommendation.** Pilot AEGIS in **production mode** as a *pre-change evidence gate*
 attached to ServiceNow normal changes for a single domain: DC fabric BGP/EVPN on Junos.
@@ -97,7 +97,7 @@ control of record:
 | N6 | Secrets (including type 7, `$9$` and hashes) were printed verbatim into the examiner PDF. | Medium | **Fixed.** Redacted in the PDF. **Still present in the bundle JSON** (see §7, decision D3). |
 | N7 | Bundle strings entered ReportLab markup unescaped: a 500 on `<`, and markup injection into the PDF. | Medium | **Fixed.** `_esc` everywhere. |
 | N8 | OSCAL export used non-UUID ids and missed required AR fields, so GRC ingestion would reject it. | Low | **Improved** (RFC 4122, `import-ap`, `target`, `collected`). **Not yet validated against the NIST schema.** |
-| N9 | **Every BGP neighbor add is BLOCK by default.** `classify_change` treats `remote-as` / `peer-as` (the *peer's* AS) as fabric identity, so the most common NetOps change can never be sealed or promoted. Measured: 0 of 1,000 "peer BGP" sim runs were sealable. | High (product) | **Default unchanged. An opt-in switch `AEGIS_PEER_AS_POLICY=hitl` ships (D1).** |
+| N9 | **Every BGP neighbor add was BLOCK by default.** `classify_change` treats `remote-as` / `peer-as` (the *peer's* AS) as fabric identity, so the most common NetOps change can never be sealed or promoted. Measured: 0 of 1,000 "peer BGP" sim runs were sealable. | High (product) | **Fixed (D1 applied):** a neighbor add is HITL by default (sealable, needs a second-person approval). `AEGIS_PEER_AS_POLICY=block` restores the original. |
 | N10 | Compliance hot path recomputed the normalized config about 23 times per run. | Low (perf) | **Fixed.** Memoized, 0.80 → 0.43 ms/run with 11 frameworks (about 1.9×). |
 
 **Test evidence (Confirmed).**
@@ -190,8 +190,8 @@ Legend: ● Confirmed by a cited source · ◑ Inferred (well known, not cited h
 | Hash-chained audit ledger + SIEM anchor | ● | ? | ? | ? | ? | ◐ ("logs every action") | ◐ (drift history) |
 | Per-change compliance crosswalk (multi-framework) | ● (11 frameworks, labelled config-checked or process-mapped) | ◑ (compliance verification) | ◐ (best-practice checks) | ? | ? | ◑ (PCI and similar reports) | ○ |
 | OSCAL output | ◐ (AR-shaped, not schema-validated) | ? | ? | ? | ? | ? | ? |
-| ServiceNow integration | ○ (`change_ref` field only) | ● (Forward AI) | ? | ● | ? | ● (Tufin ITSM), ◐ (FireMon) | ? |
-| NetBox integration | ○ | ● (`fwd-netbox`) | ● | ? | ? | ? | ● |
+| ServiceNow integration | ◐ (CHG attach + hold built; not yet live) | ● (Forward AI) | ? | ● | ? | ● (Tufin ITSM), ◐ (FireMon) | ? |
+| NetBox integration | ◐ (roles + sealed rev built; not yet live) | ● (`fwd-netbox`) | ● | ? | ? | ? | ● |
 | MCP / agent tool surface | ○ (REST only) | ● | ● | ◐ (roadmap) | ● | ? | ? |
 | Self-hosted LLM enforced (zero egress) | ● (loopback-only check) | ? | n/a | ? | ◐ (claimed on-prem; Conflicting) | n/a | n/a |
 | Open source, inspectable gate logic | ● (Apache-2.0) | ○ | ○ | ○ | ○ (has a GitHub org; product is commercial) | ○ | ◐ (NetBox core only) |
@@ -203,11 +203,11 @@ Legend: ● Confirmed by a cited source · ◑ Inferred (well known, not cited h
 | # | Gap | Who does it | Impact | Fix |
 |---|---|---|---|---|
 | G1 | No reachability, ACL or firewall analysis | Forward Predict, Batfish, NSPM vendors | **Critical.** Most network security risk is segmentation and policy, not BGP session counts. | **In progress (2026-10-24):** intent engine on Batfish (`docs/INTENTS.md`) covering reachability allow/deny, BGP, undefined references and shadowed ACL lines, with a before/after differential. A real-engine CI job is added. Still open: firewall/NAT zone policies (PAN-OS, SRX) and F5. |
-| G2 | No ServiceNow integration | NetBrain, Tufin, Forward AI | High. CAB evidence has to be attached by hand. | P3: attach the verdict and PDF to the CHG, and block CAB on `blocked` |
-| G3 | No post-change verification or drift detection | IP Fabric, Apstra, NetBox Assurance, Cisco NDI | High. You prove the plan, not the outcome. | P4: snapshot production after the push and diff it against the twin |
+| G2 | No ServiceNow integration | NetBrain, Tufin, Forward AI | High. CAB evidence has to be attached by hand. | **Built 2026-10-25 (contract-tested, not yet live):** `POST /api/integrations/servicenow/sync` attaches the redacted PDF and verdict JSON to the sealed CHG, writes `u_aegis_verdict`, and puts blocked changes on hold. A business-rule recipe for hard CAB enforcement is in `docs/INTEGRATIONS.md`. Needs an instance and service account to go live. |
+| G3 | No post-change verification or drift detection | IP Fabric, Apstra, NetBox Assurance, Cisco NDI | High. You prove the plan, not the outcome. | **Partly built 2026-10-25:** `POST /api/postchange/verify` proves the sealed lines landed (Junos set/delete, Cisco line/no) and re-runs intents on the running configs. Continuous drift detection is still open. |
 | G4 | Twin fidelity unproven in this repo (community tier is a simulator) | NetPilot and Nokia EDA (real NOS); Forward (mathematical model at scale) | High. Credibility. | Pilot with cRPD/vJunos on the DC fabric lab and publish fidelity results |
-| G5 | Firewall and load-balancer domains (PAN-OS, F5) | NSPM vendors | Medium | P4, a second domain. Or *consume* NSPM results as evidence instead of rebuilding them. |
-| G6 | No NetBox source-of-truth | IP Fabric, Forward, NetBox Assurance | Medium. Roles are guessed from device names. | P3: NetBox roles and `inventory_rev` |
+| G5 | Firewall and load-balancer domains (PAN-OS, F5) | NSPM vendors | Medium | **PAN-OS and SRX built 2026-10-25:** `firewall_policy` (zone-to-zone transit) and `nat` intents, proven against live Batfish in CI. F5 is still open. Consuming NSPM results remains an option. |
+| G6 | No NetBox source-of-truth | IP Fabric, Forward, NetBox Assurance | Medium. Roles are guessed from device names. | **Built 2026-10-25 (contract-tested, not yet live):** NetBox roles can only *raise* authority; `netbox:<sha256>` is sealed as `twin.inventory_rev` and bound into v2 tokens. Production fails closed if NetBox is unreachable. |
 | G7 | No MCP tool surface | Forward, IP Fabric, NetPilot | Medium. Agents will call whatever exposes MCP. | Expose `preflight`, `verify` and `promote` as MCP tools behind the same gate |
 | G8 | Support, scale and bus factor (one maintainer) | Every commercial vendor | Medium for a control of record | Internal ownership plus a RACI (§4.3); keep the open-source core |
 
@@ -348,11 +348,11 @@ Each phase has an owner, an exit criterion and an effort estimate in engineer-we
 
 | # | Decision | Options | Recommendation |
 |---|---|---|---|
-| **D1** | Is a BGP neighbor add (`remote-as` / `peer-as`) fabric identity (BLOCK)? (N9) | (a) keep BLOCK; (b) treat peer AS as a *peering* change, HITL minimum, with only `router bgp N` / `local-as` / `autonomous-system` / RD / RT as BLOCK | **(b)**. Today the tool can never promote its most common change, so teams will route around it. **Shipped as a switch:** `AEGIS_PEER_AS_POLICY=hitl` (the default stays `block`). Flip it after InfoSec agrees. |
-| **D2** | Should Cisco type 7 and Junos `$9$` fail PCI 8.3.2? | (a) report only (current); (b) fail | **(b) for PCI-scoped devices.** Both are reversible obfuscation, not strong crypto. Needs InfoSec sign-off. |
-| **D3** | Secrets in the bundle JSON (the push artifact) | (a) keep (promotion pushes from the bundle); (b) replace with vault references resolved only by the connector | **(b) in P2.** Until then, treat bundles as Confidential. |
-| **D4** | Which standard governs? | IS-022P / ITS-025P / HITRUST (2020–21) or a newer set | Confirm the current version. This doc maps to the 2020–21 set found by the earlier session. |
-| **D5** | Pilot domain | DC fabric (Junos BGP/EVPN) vs WAN edge vs firewalls | **DC fabric.** Best twin fidelity (containerlab cRPD/vJunos), and the authority model already understands ASN/RD/RT/underlay. |
+| **D1** | Is a BGP neighbor add (`remote-as` / `peer-as`) fabric identity (BLOCK)? (N9) | (a) keep BLOCK; (b) treat peer AS as a *peering* change, HITL minimum, with only `router bgp N` / `local-as` / `autonomous-system` / RD / RT as BLOCK | **(b)**. Today the tool can never promote its most common change, so teams will route around it. **Applied 2026-10-25 (owner decision):** `hitl` is now the default. `AEGIS_PEER_AS_POLICY=block` restores the old behavior. The device's own AS, RD and RT stay BLOCK. InfoSec sign-off still needs to be recorded. |
+| **D2** | Should Cisco type 7 and Junos `$9$` fail PCI 8.3.2? | (a) report only (was the behavior); (b) fail | **(b) for PCI-scoped devices.** Both are reversible obfuscation, not strong crypto. **Applied 2026-10-25:** PCI 8.3.2 FAILs on them by default (the PCI framework runs only when selected, so selection = scope). `AEGIS_REVERSIBLE_SECRETS=report` restores PASS-with-note. Compliance rows are evidence and do not change the verdict. **Impact:** Junos stores every BGP/OSPF key as `$9$`, so a Junos change that carries a key fails 8.3.2 until D3 (vault references) or TCP-AO/keychain policy lands. InfoSec sign-off still needs to be recorded. |
+| **D3** | Secrets in the bundle JSON (the push artifact) | (a) keep (promotion pushes from the bundle); (b) replace with vault references resolved only by the connector | **(b) in P2.** Until then, treat bundles as Confidential. **Design recorded:** `docs/DESIGN_D3_SECRET_REFERENCES.md`. Not implemented. |
+| **D4** | Which standard governs? | IS-022P / ITS-025P / HITRUST (2020–21) or a newer set | Confirm the current version. This doc maps to the 2020–21 set found by the earlier session. **Open: owner input needed.** No change made. |
+| **D5** | Pilot domain | DC fabric (Junos BGP/EVPN) vs WAN edge vs firewalls | **DC fabric.** Best twin fidelity (containerlab cRPD/vJunos), and the authority model already understands ASN/RD/RT/underlay. **Recorded 2026-10-25** as the pilot domain. Firewall intents (SRX / PAN-OS zone and NAT) ship as the P2 expansion path. |
 
 ---
 

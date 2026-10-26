@@ -35,7 +35,8 @@ def build_bundle(*, run_id, created, operator, intent, source, configs, batfish,
                  change_ref: str | None = None,
                  rollback_verified: bool = False,
                  intents: dict | None = None,
-                 verify_errors: int | None = None) -> dict:
+                 verify_errors: int | None = None,
+                 inventory: dict | None = None) -> dict:
     severity = _severity(diff["devices_affected"],
                          len(diff["sessions_dropped"]),
                          batfish["errors"] if verify_errors is None else verify_errors,
@@ -72,6 +73,11 @@ def build_bundle(*, run_id, created, operator, intent, source, configs, batfish,
             "converged": twin["converged"],
             "convergence_sec": twin["convergence_sec"],
             "bgp_sessions": {"before": twin["bgp_before"], "after": twin["bgp_after"]},
+            # source-of-truth binding (NetBox): sealed, and folded into v2 approval tokens
+            **({"inventory_rev": str(inventory.get("inventory_rev") or ""),
+                "device_roles": {str(k): str(v) for k, v in
+                                 (inventory.get("roles") or {}).items()}}
+               if inventory else {}),
         },
         "validation": {
             "batfish": {

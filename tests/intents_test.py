@@ -13,6 +13,10 @@
   I10 runner without AEGIS_BATFISH_HOST fails closed (never "skipped")
   I11 HTTP: bad intents → 400; valid intents without an engine → blocked bundle; status +
       metrics report the engine; PDF/CAB render the intent rows
+  I12 firewall_policy: zones resolve to @enter() start locations; an unknown zone is an error;
+      deny/allow semantics as reachability; spec rejects bad zone/node names
+  I13 nat: translated/untranslated against post-NAT headers; undelivered flow fails; no
+      trace is an error; ECMP traces must all agree; spec enforces field combinations
 
 Usage:  python3 -m aegis.tests.intents_test
 """
@@ -46,8 +50,11 @@ class Fixture:
     name = "fixture"
 
     def __init__(self, *, success=(), failure=(), bgp=(), refs=(), dead=(),
-                 parse=(("configs/r1.cfg", "PASSED"),), boom=False):
+                 parse=(("configs/r1.cfg", "PASSED"),), boom=False, zones=None, traces=()):
         self.success, self.failure = list(success), list(failure)
+        self.zones = zones or {}
+        self.traces = list(traces)
+        self.starts: list[str | None] = []
         self.bgp, self.refs, self.dead = list(bgp), list(refs), list(dead)
         self.parse = [{"file": f, "status": s} for f, s in parse]
         self.boom = boom
@@ -58,7 +65,15 @@ class Fixture:
     def reachability(self, *, start, src_ips, dst_ips, protocols, dst_ports, action):
         if self.boom:
             raise OracleError("engine down")
-        return self.success if action == "SUCCESS" else self.failure
+        self.starts.append(start)
+        self.actions = getattr(self, "actions", []) + [action]
+        return self.failure if action == "FAILURE" else self.success
+
+    def zone_interfaces(self, node, zone):
+        return list(self.zones.get((node, zone), []))
+
+    def traceroute(self, *, start, src_ip, dst_ip, protocol, dst_port):
+        return self.traces
 
     def bgp_sessions(self, nodes):
         return self.bgp
@@ -288,8 +303,127 @@ def http() -> None:
             os.environ["AEGIS_BATFISH_HOST"] = saved
 
 
+FW = {"id": "untrust-x-trust", "kind": "firewall_policy", "node": "fw1",
+      "from_zone": "untrust", "to_zone": "trust", "dst_ips": "10.1.0.0/24",
+      "protocols": ["tcp"], "dst_ports": "1-65535", "expect": "deny"}
+ZONES = {("fw1", "untrust"): ["ge-0/0/1.0"], ("fw1", "trust"): ["ge-0/0/0.0", "ge-0/0/3.0"]}
+NAT = {"id": "web-dnat", "kind": "nat", "start": "@enter(fw1[ge-0/0/1.0])",
+       "src_ip": "198.51.100.7", "dst_ip": "203.0.113.10", "protocol": "tcp", "dst_port": 443,
+       "expect": "translated", "translated_dst_ip": "10.2.0.10"}
+
+
+def _trace(disp="DELIVERED_TO_SUBNET", dst="10.2.0.10", src="198.51.100.7", changes=None):
+    return {"disposition": disp, "final": {"srcIp": src, "dstIp": dst, "srcPort": "49152",
+                                           "dstPort": "443"},
+            "changes": changes if changes is not None else [f"fw1: dstIp 203.0.113.10→{dst}"],
+            "text": "fw1 ..."}
+
+
+def firewall() -> None:
+    ints = parse_intents([FW])
+    fx = Fixture(zones=ZONES, success=["10.9.9.9->10.1.0.5:22"])
+    r = check_intents(ints, candidate=fx, engine="fixture")["results"][0]
+    check("I12.deny_leak_fails", r["status"] == "fail" and "untrust→trust" in r["evidence"],
+          json.dumps(r))
+    check("I12.start_from_zone", fx.starts and fx.starts[0] == "@enter(fw1[ge-0/0/1.0])",
+          str(fx.starts))
+    check("I12.transit_dispositions_only",
+          fx.actions[0] == "DELIVERED_TO_SUBNET,EXITS_NETWORK", str(fx.actions))
+    r = check_intents(ints, candidate=Fixture(zones=ZONES), engine="fixture")["results"][0]
+    check("I12.deny_clean_passes", r["status"] == "pass", json.dumps(r))
+    r = check_intents(parse_intents([dict(FW, from_zone="untrsut")]),
+                      candidate=Fixture(zones=ZONES), engine="fixture")["results"][0]
+    check("I12.unknown_zone_error", r["status"] == "error" and "untrsut" in r["evidence"],
+          json.dumps(r))
+    allow = dict(FW, id="trust-to-untrust", from_zone="trust", to_zone="untrust",
+                 dst_ips="203.0.113.0/24", expect="allow")
+    fx = Fixture(zones=ZONES, success=["ok"])
+    r = check_intents(parse_intents([allow]), candidate=fx, engine="fixture")["results"][0]
+    check("I12.allow_passes", r["status"] == "pass", json.dumps(r))
+    check("I12.multi_iface_start", fx.starts[0] == "@enter(fw1[ge-0/0/0.0]),@enter(fw1[ge-0/0/3.0])",
+          str(fx.starts))
+    r = check_intents(parse_intents([allow]), candidate=Fixture(zones=ZONES), engine="fixture")
+    check("I12.allow_vacuous_error", r["results"][0]["status"] == "error",
+          json.dumps(r["results"][0]))
+    for name, bad in {"zone_space": dict(FW, from_zone="un trust"),
+                      "missing_zone": {k: v for k, v in FW.items() if k != "to_zone"},
+                      "bad_expect": dict(FW, expect="translated"),
+                      "start_not_allowed": dict(FW, start="@enter(fw1[x])")}.items():
+        try:
+            parse_intents([bad])
+            check(f"I12.reject_{name}", False, "accepted")
+        except IntentSpecError:
+            check(f"I12.reject_{name}", True)
+
+
+def nat() -> None:
+    ints = parse_intents([NAT])
+    r = check_intents(ints, candidate=Fixture(traces=[_trace()]), engine="fixture")["results"][0]
+    check("I13.translated_pass", r["status"] == "pass" and "10.2.0.10" in r["evidence"],
+          json.dumps(r))
+    r = check_intents(ints, candidate=Fixture(traces=[_trace(dst="10.2.0.99")]),
+                      engine="fixture")["results"][0]
+    check("I13.wrong_target_fails", r["status"] == "fail" and "10.2.0.99" in r["examples"][0],
+          json.dumps(r))
+    r = check_intents(ints, candidate=Fixture(traces=[_trace(disp="DENIED_IN")]),
+                      engine="fixture")["results"][0]
+    check("I13.undelivered_fails", r["status"] == "fail" and "DENIED_IN" in r["examples"][0],
+          json.dumps(r))
+    r = check_intents(ints, candidate=Fixture(traces=[_trace(), _trace(dst="203.0.113.10",
+                                                                        changes=[])]),
+                      engine="fixture")["results"][0]
+    check("I13.ecmp_all_must_agree", r["status"] == "fail", json.dumps(r))
+    r = check_intents(ints, candidate=Fixture(traces=[]), engine="fixture")["results"][0]
+    check("I13.no_trace_error", r["status"] == "error", json.dumps(r))
+    keep = {"id": "east-west-real-src", "kind": "nat", "start": "@enter(fw1[ge-0/0/0.0])",
+            "src_ip": "10.1.0.5", "dst_ip": "10.2.0.10", "protocol": "tcp", "dst_port": 443,
+            "expect": "untranslated"}
+    r = check_intents(parse_intents([keep]), candidate=Fixture(traces=[_trace(
+        src="10.1.0.5", changes=[])]), engine="fixture")["results"][0]
+    check("I13.untranslated_pass", r["status"] == "pass", json.dumps(r))
+    r = check_intents(parse_intents([keep]), candidate=Fixture(traces=[_trace(
+        src="203.0.113.1", changes=["fw1: srcIp 10.1.0.5→203.0.113.1"])]),
+        engine="fixture")["results"][0]
+    check("I13.untranslated_fails_on_snat", r["status"] == "fail", json.dumps(r))
+    ref = Fixture(traces=[_trace()])
+    cand = Fixture(traces=[_trace(dst="10.2.0.99")])
+    rec = check_intents(ints, candidate=cand, reference=ref, engine="fixture")
+    check("I13.regression", rec["regressions"] == 1 and rec["results"][0]["regression"] is True,
+          json.dumps(rec["results"][0]))
+    for name, bad in {"no_translation_target": {k: v for k, v in NAT.items()
+                                                if k != "translated_dst_ip"},
+                      "untranslated_with_target": dict(NAT, expect="untranslated"),
+                      "prefix_not_ip": dict(NAT, dst_ip="203.0.113.0/24"),
+                      "tcp_without_port": {k: v for k, v in NAT.items() if k != "dst_port"},
+                      "icmp_with_port": dict(NAT, protocol="icmp"),
+                      "port_range": dict(NAT, dst_port=70000),
+                      "bool_port": dict(NAT, dst_port=True)}.items():
+        try:
+            parse_intents([bad])
+            check(f"I13.reject_{name}", False, "accepted")
+        except IntentSpecError:
+            check(f"I13.reject_{name}", True)
+    # schema: new kinds are valid in a sealed bundle
+    try:
+        import jsonschema
+    except ImportError:
+        return
+    b = run_preflight("add vlan 10 to leaf-1", backend=SimulatorBackend(), lab="single",
+                      intents=parse_intents([FW, NAT]),
+                      intent_runner=lambda i, c: check_intents(
+                          i, candidate=Fixture(zones=ZONES, traces=[_trace()]),
+                          engine="fixture"))
+    with open(_SCHEMA, encoding="utf-8") as fh:
+        jsonschema.validate(b, json.load(fh))
+    check("I13.schema_valid_new_kinds", verify(b)
+          and {r["kind"] for r in b["validation"]["intents"]["results"]} == {"firewall_policy",
+                                                                            "nat"})
+
+
 def main() -> int:
     http()
+    firewall()
+    nat()
     spec()
     semantics()
     snapshots()

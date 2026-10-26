@@ -36,6 +36,23 @@ def _validate(b: dict) -> None:
         jsonschema.validate(b, _schema())
 
 
+class _peer_as_policy:
+    """Pin AEGIS_PEER_AS_POLICY for one test (D1 made ``hitl`` the default)."""
+
+    def __init__(self, value: str) -> None:
+        self.value, self.old = value, None
+
+    def __enter__(self):
+        self.old = os.environ.get("AEGIS_PEER_AS_POLICY")
+        os.environ["AEGIS_PEER_AS_POLICY"] = self.value
+
+    def __exit__(self, *exc):
+        if self.old is None:
+            os.environ.pop("AEGIS_PEER_AS_POLICY", None)
+        else:
+            os.environ["AEGIS_PEER_AS_POLICY"] = self.old
+
+
 def _b(intent: str, **kw) -> dict:
     return run_preflight(intent, backend=SimulatorBackend(), lab="clos-evpn", **kw)
 
@@ -54,8 +71,14 @@ def test_bundle_carries_sealed_authority_v12() -> None:
     a = b["change"]["authority"]
     assert set(a) == {"severity", "required", "max_authorized", "allowed", "effective", "change_class"}
     assert a["required"] in ("auto", "hitl", "hotl", "block")
-    assert set(a["change_class"]) == {"touches_asn", "touches_rd_rt", "touches_spine", "touches_underlay"}
+    base = {"touches_asn", "touches_rd_rt", "touches_spine", "touches_underlay"}
+    # default (D1, hitl) records touches_peer_as; AEGIS_PEER_AS_POLICY=block keeps the v1.2 set
+    assert set(a["change_class"]) == base | {"touches_peer_as"}
     assert verify(b)
+    _validate(b)
+    with _peer_as_policy("block"):
+        b = _b("add vlan 10 to leaf-1")
+    assert set(b["change"]["authority"]["change_class"]) == base
     _validate(b)
 
 
@@ -67,11 +90,27 @@ def test_authority_is_under_the_seal() -> None:
 
 
 def test_asn_change_forces_block_authority() -> None:
-    b = _b("peer bgp with neighbor 10.0.0.1 remote-as 65010")
+    with _peer_as_policy("block"):
+        b = _b("peer bgp with neighbor 10.0.0.1 remote-as 65010")
     a = b["change"]["authority"]
     assert a["change_class"]["touches_asn"]
     assert a["required"] == "block" and a["effective"] == "block" and a["allowed"] is False
     _validate(b)
+
+
+def test_peer_as_default_is_hitl_local_as_stays_block() -> None:
+    """D1 default: a neighbor add is a peering change (HITL, approvable, never AUTO); the
+    device's own AS (router bgp N) is still fabric identity and stays BLOCK."""
+    b = _b("peer bgp with neighbor 10.0.0.1 remote-as 65010")
+    a = b["change"]["authority"]
+    assert a["change_class"]["touches_peer_as"] and not a["change_class"]["touches_asn"]
+    assert a["required"] not in ("block", "auto"), a
+    _validate(b)
+    own = [{"device": "leaf-1", "vendor": "frr", "config": "router bgp 65010",
+            "grounded_commands": []}]
+    b = run_preflight("", backend=SimulatorBackend(), lab="single", source="config_import",
+                      imported_configs=own)
+    assert b["change"]["authority"]["required"] == "block"
 
 
 # ── gate rule G5: no self-escalation ────────────────────────────────────────────
@@ -79,7 +118,8 @@ def test_asn_change_forces_block_authority() -> None:
 def test_gate_g5_blocks_block_authority_even_when_otherwise_promotable() -> None:
     """A twin-clean, low-risk AS change is promotable by G1-G4 yet G5 blocks it: the
     change requires BLOCK authority, above any valid ceiling."""
-    b = _b("peer bgp with neighbor 10.0.0.1 remote-as 65010")
+    with _peer_as_policy("block"):
+        b = _b("peer bgp with neighbor 10.0.0.1 remote-as 65010")
     assert b["change"]["authority"]["required"] == "block"
     # make it otherwise fully promotable, keep the (block) authority, re-seal:
     b["verdict"]["decision"] = "ship_ready"
@@ -118,8 +158,10 @@ def test_no_promoted_bundle_exceeds_ceiling_property() -> None:
                "enable ospf area 0 on edge-{n}", "shut interface ethernet-1/{n}"]
     rng = random.Random(7)
     promoted = denied_block = 0
-    for _ in range(300):
-        b = _b(intents[rng.randrange(len(intents))].format(n=rng.randint(1, 9)))
+    for i in range(300):
+        # alternate the D1 policy so both the BLOCK-tier and the HITL peering path are swept
+        with _peer_as_policy("block" if i % 2 else "hitl"):
+            b = _b(intents[rng.randrange(len(intents))].format(n=rng.randint(1, 9)))
         try:
             promote(b, connector=DryRunConnector(), approver="noc-lead",
                     approval_token="t", allow_live=False)

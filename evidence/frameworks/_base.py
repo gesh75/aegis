@@ -99,7 +99,8 @@ class ComplianceSignal:
         return bool(self.plaintext_secret_labels())
 
     def reversible_secret_labels(self) -> list[str]:
-        """Cisco type 7 / Junos $9$ — obfuscated, trivially reversible. Reported, not failed."""
+        """Cisco type 7 / Junos $9$ — obfuscated, trivially reversible. PCI 8.3.2 fails on
+        them under ``secrets.reversible_policy() == "fail"`` (the D2 default)."""
         return secrets.reversible_hits(self.text())
 
     def missing_export_policy(self) -> bool:

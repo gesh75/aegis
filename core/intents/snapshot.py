@@ -61,9 +61,10 @@ def _is_set_delta(text: str) -> bool:
                                for ln in lines)
 
 
-def materialize(configs: list[dict], base: dict[str, str]
+def materialize(configs: list[dict], base: dict[str, str], replace: bool = False
                 ) -> tuple[dict[str, str] | None, dict[str, str], list[dict]]:
-    """(reference_files | None, candidate_files, merge_log)."""
+    """(reference_files | None, candidate_files, merge_log). ``replace`` forces full-file
+    replacement (post-change: the configs ARE the running configs)."""
     reference = {f"configs/{_fname(k)}": v for k, v in base.items()} if base else None
     candidate = dict(reference or {})
     log: list[dict] = []
@@ -73,7 +74,8 @@ def materialize(configs: list[dict], base: dict[str, str]
         text = str(c.get("config") or "")
         path = f"configs/{_fname(device)}"
         base_text = base.get(os.path.splitext(_fname(device))[0].lower())
-        if vendor == "junos" and base_text is not None and _is_set_delta(text):
+        if (not replace and vendor == "junos" and base_text is not None
+                and _is_set_delta(text)):
             flat = junos.to_set(base_text) if junos.looks_hierarchical(base_text) else base_text
             body = flat.rstrip("\n") + "\n" + text.strip("\n") + "\n"
             if not body.lstrip().startswith(_JUNOS_HEADER):
@@ -81,6 +83,8 @@ def materialize(configs: list[dict], base: dict[str, str]
             candidate[path] = body
             mode = "junos-set-merge"
         elif base_text is not None:
+            if vendor == "junos" and _is_set_delta(text) and _JUNOS_HEADER not in text:
+                text = _JUNOS_HEADER + "\n" + text   # display-set running config
             candidate[path] = text
             mode = "replace"
         else:

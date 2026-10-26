@@ -63,8 +63,8 @@ class ChangeClass:
     touches_rd_rt: bool = False
     touches_spine: bool = False
     touches_underlay: bool = False
-    # Peer AS (remote-as / peer-as) under AEGIS_PEER_AS_POLICY=hitl: a peering change,
-    # not fabric identity. Under the default policy ("block") it folds into touches_asn.
+    # Peer AS (remote-as / peer-as) under AEGIS_PEER_AS_POLICY=hitl (default): a peering
+    # change, not fabric identity. Under AEGIS_PEER_AS_POLICY=block it folds into touches_asn.
     touches_peer_as: bool = False
 
     @property
@@ -86,10 +86,11 @@ _PEER_ASN_RE = re.compile(r"(?:remote-as|peer-as)\s+\d+", re.IGNORECASE)
 
 
 def peer_as_policy() -> str:
-    """AEGIS_PEER_AS_POLICY: ``block`` (default — peer AS is fabric identity, the original
-    fail-closed behavior) or ``hitl`` (a BGP neighbor add is a peering change: HITL minimum,
-    still never AUTO). Invalid values are fatal, never silently permissive."""
-    raw = (os.environ.get("AEGIS_PEER_AS_POLICY") or "block").strip().lower()
+    """AEGIS_PEER_AS_POLICY (decision D1): ``hitl`` (default — a BGP neighbor add is a
+    peering change: HITL minimum, never AUTO; the device's own AS, RD and RT stay BLOCK) or
+    ``block`` (the original behavior — any AS number, including the peer's, is fabric
+    identity). Invalid values are fatal, never silently permissive."""
+    raw = (os.environ.get("AEGIS_PEER_AS_POLICY") or "hitl").strip().lower()
     if raw not in ("block", "hitl"):
         raise ValueError(f"AEGIS_PEER_AS_POLICY must be block|hitl (got {raw!r})")
     return raw
@@ -102,10 +103,21 @@ _SPINE_NAME_RE = re.compile(r"\bspine\b", re.IGNORECASE)
 _UNDERLAY_NAME_RE = re.compile(r"\b(?:underlay|super-?spine)\b", re.IGNORECASE)
 
 
-def classify_change(configs: list[GeneratedConfig]) -> ChangeClass:
-    """Classify candidate configs into fabric-construct flags (the hard-force triggers)."""
+def classify_change(configs: list[GeneratedConfig],
+                    roles: dict[str, str] | None = None) -> ChangeClass:
+    """Classify candidate configs into fabric-construct flags (the hard-force triggers).
+
+    ``roles`` ({device: role slug}, e.g. from NetBox) can only ADD spine/underlay flags on
+    top of the name/protocol heuristic, never clear one, so a source-of-truth gap can only
+    make the result stricter."""
     text = "\n".join(c.get("config", "") for c in configs)
     names = " ".join(c.get("device", "") for c in configs)
+    role_spine = role_underlay = False
+    if roles:
+        from ..integrations.netbox import spine_roles, underlay_roles
+        dev_roles = {str(roles.get(c.get("device", "")) or "").lower() for c in configs}
+        role_spine = bool(dev_roles & spine_roles())
+        role_underlay = bool(dev_roles & underlay_roles())
     if peer_as_policy() == "hitl":
         asn = bool(_LOCAL_ASN_RE.search(text))
         peer = bool(_PEER_ASN_RE.search(text))
@@ -115,8 +127,9 @@ def classify_change(configs: list[GeneratedConfig]) -> ChangeClass:
         touches_asn=asn,
         touches_peer_as=peer,
         touches_rd_rt=bool(_RD_RT_RE.search(text)),
-        touches_spine=bool(_SPINE_NAME_RE.search(names)),
-        touches_underlay=bool(_UNDERLAY_NAME_RE.search(names) or _UNDERLAY_CONFIG_RE.search(text)),
+        touches_spine=bool(_SPINE_NAME_RE.search(names)) or role_spine,
+        touches_underlay=bool(_UNDERLAY_NAME_RE.search(names) or _UNDERLAY_CONFIG_RE.search(text))
+        or role_underlay,
     )
 
 
@@ -241,8 +254,8 @@ def authority_record(severity: Severity, change_class: ChangeClass,
             "touches_rd_rt": change_class.touches_rd_rt,
             "touches_spine": change_class.touches_spine,
             "touches_underlay": change_class.touches_underlay,
-            # only recorded when the peer-AS policy is in effect, so default bundles keep
-            # their exact v1.2 shape
+            # only recorded under the hitl policy; with AEGIS_PEER_AS_POLICY=block the
+            # record keeps its exact v1.2 shape
             **({"touches_peer_as": change_class.touches_peer_as}
                if peer_as_policy() == "hitl" else {}),
         },

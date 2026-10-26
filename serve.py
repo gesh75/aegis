@@ -38,6 +38,11 @@ from aegis.core.promote import approvers
 from aegis.core import runtime
 from aegis.evidence.ledger import Ledger, sink_from_env
 from aegis.core.intents import IntentSpecError, load_intents, parse_intents
+from aegis.core.risk.authority import peer_as_policy
+from aegis.core.integrations import IntegrationError
+from aegis.core.integrations import netbox, servicenow
+from aegis.core.postchange import verify_postchange
+from aegis.evidence.secrets import reversible_policy
 
 _UI = os.path.join(os.path.dirname(__file__), "ui", "preflight_screen.html")
 _UI_JS = os.path.join(os.path.dirname(__file__), "ui", "preflight.js")
@@ -111,7 +116,25 @@ runtime.assert_startup_ok()  # production refuses to start with any control unse
 _SIGNER = _load_signer()
 _VERIFIER: Ed25519Verifier = _SIGNER.verifier()
 load_approve_key()  # SystemExit if AEGIS_APPROVE_KEY is set but unusable
+
+
+def _require_api_key_for_hmac() -> None:
+    """Same rule as the pinned seal key: an unauthenticated server must never mint
+    HMAC approvals, or anyone who can reach it could approve their own change."""
+    if hmac_configured() and not _api_key():
+        raise SystemExit(
+            "[aegis.auth] AEGIS_APPROVE_KEY is set but AEGIS_API_KEY is unset; "
+            "refusing to mint HMAC approvals on an unauthenticated server"
+        )
+
+
+_require_api_key_for_hmac()
 approvers.load_registry()  # SystemExit if AEGIS_APPROVER_KEYS is malformed
+for _policy in (peer_as_policy, reversible_policy):  # D1 / D2 switches: a typo is fatal
+    try:
+        _policy()
+    except ValueError as _exc:
+        raise SystemExit(f"[aegis.policy] {_exc}") from _exc
 _LEDGER = Ledger(os.environ.get("AEGIS_LEDGER_PATH") or None, sink=sink_from_env())
 
 
@@ -223,7 +246,9 @@ def status():
         "intents_engine": ("batfish" if (os.environ.get("AEGIS_BATFISH_HOST") or "").strip()
                            else "unconfigured"),
         "baseline_intents": len(_BASELINE_INTENTS),
-        "egress": "none",
+        "egress": "none",  # the preflight run; integrations are separate, ledgered calls
+        "integrations": {"servicenow": servicenow.configured(),
+                         "netbox": netbox.configured()},
     })
 
 
@@ -335,7 +360,8 @@ def preflight_run():
             operator=(data.get("operator") or "community").strip(),
             approver=data.get("approver") or None,
             source=source, imported_configs=imported, change_ref=change_ref,
-            intents=intents or None)
+            intents=intents or None,
+            inventory_lookup=_netbox_lookup if netbox.configured() else None)
     except PreflightError as e:
         _inc("aegis_preflight_runs_total", decision="guard_rejected")
         return _reject_run({"error": str(e), "stage": "guard"}, 400)
@@ -437,6 +463,10 @@ def approve_mint():
     if not hmac_configured():
         return jsonify({"error": "AEGIS_APPROVE_KEY is unset — HMAC minting refused "
                                  "(asserted-unverified mode)"}), 503
+    if not _api_key():  # env changed after startup — still never mint unauthenticated
+        return jsonify({"error": "AEGIS_APPROVE_KEY is set but AEGIS_API_KEY is unset — "
+                                 "refusing to mint HMAC approvals on an unauthenticated "
+                                 "server"}), 503
     data = request.get_json(silent=True) or {}
     bundle = data.get("bundle")
     who = data.get("approver") if isinstance(data.get("approver"), str) else ""
@@ -549,6 +579,110 @@ def preflight_promote():
         _inc("aegis_promotions_total", status="error")
         return jsonify({"error": _client_error(e)}), 500
     _inc("aegis_promotions_total", status=rec["status"])
+    return jsonify(rec)
+
+
+def _netbox_lookup(devices: list[str]) -> dict:
+    """Roles + sealed inventory rev from NetBox. Production fails closed (the run is
+    rejected). The community tier records ``netbox:unavailable`` and falls back to the
+    name heuristic, which can only be stricter, never looser."""
+    try:
+        client = netbox.NetBoxClient()
+        try:
+            inv = client.inventory(devices)
+        finally:
+            client.close()
+        _inc("aegis_integration_calls_total", system="netbox", result="ok")
+        return inv
+    except IntegrationError as exc:
+        _inc("aegis_integration_calls_total", system="netbox", result="error")
+        if runtime.is_production():
+            raise PreflightError(f"source of truth unavailable: {exc}") from exc
+        return {"roles": {}, "inventory_rev": "netbox:unavailable", "missing": devices}
+
+
+def _integration_guard():
+    denied = _guard_api()
+    if denied:
+        return denied
+    if not _api_key():
+        return jsonify({"error": "integrations require AEGIS_API_KEY — an unauthenticated "
+                                 "server must never write to ITSM"}), 503
+    return None
+
+
+@app.post("/api/integrations/servicenow/sync")
+def servicenow_sync():
+    """Attach the verdict + redacted PDF to the CHG the bundle was sealed against; a
+    blocked verdict puts the CHG on hold. Explicit, operator-triggered, ledgered."""
+    denied = _integration_guard()
+    if denied:
+        return denied
+    if not servicenow.configured():
+        return jsonify({"error": "AEGIS_SNOW_URL is not set"}), 503
+    err, bundle, authenticity = _verified_bundle()
+    if err:
+        return err
+    run_id = bundle.get("run_id")
+    try:
+        pdf = render_pdf(bundle, authenticity=authenticity)
+        client = servicenow.ServiceNowClient()
+        try:
+            rec = client.sync(bundle, pdf)
+        finally:
+            client.close()
+    except IntegrationError as exc:
+        _inc("aegis_integration_calls_total", system="servicenow", result="error")
+        _LEDGER.append("itsm_sync_failed", run_id=run_id, reason=str(exc)[:200])
+        return jsonify({"error": str(exc)}), 502
+    except Exception as e:  # noqa: BLE001
+        _inc("aegis_integration_calls_total", system="servicenow", result="error")
+        return jsonify({"error": _client_error(e)}), 500
+    _inc("aegis_integration_calls_total", system="servicenow", result="ok")
+    _LEDGER.append("itsm_synced", run_id=run_id, change_ref=rec["change_ref"],
+                   decision=rec["decision"], on_hold=rec["on_hold"],
+                   change_sys_id=rec["change_sys_id"])
+    return jsonify(rec)
+
+
+@app.post("/api/postchange/verify")
+def postchange_verify():
+    """Body {bundle, running_configs:[{device, vendor, config}], intents?}. Proves the sealed
+    change landed (line presence) and re-checks intents on the running configs."""
+    denied = _guard_api()
+    if denied:
+        return denied
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "body must be a JSON object"}), 400
+    bundle = data.get("bundle")
+    running = data.get("running_configs")
+    if not isinstance(bundle, dict) or not (bundle.get("integrity") or {}).get("sha256"):
+        return jsonify({"error": "body must include the sealed bundle"}), 400
+    if not isinstance(running, list) or not running or len(running) > 200:
+        return jsonify({"error": "running_configs must be a list of 1-200 devices"}), 400
+    if sum(len(str((r or {}).get("config") or "")) for r in running
+           if isinstance(r, dict)) > 5_000_000:
+        return jsonify({"error": "running configs exceed 5 MB"}), 400
+    if not bundler_verify(bundle):
+        return jsonify({"error": "bundle integrity verification failed"}), 422
+    seal = bundle.get("seal")
+    if not isinstance(seal, dict) or not verify_seal(bundle, seal, _VERIFIER).valid:
+        # only an approved, sealed change can have been pushed
+        return jsonify({"error": "post-change verification needs a bundle sealed by this "
+                                 "AEGIS (pinned key)"}), 422
+    try:
+        extra = parse_intents(data["intents"]) if data.get("intents") else []
+        intents = parse_intents(_BASELINE_INTENTS + extra)  # re-validate: dup ids
+    except IntentSpecError as e:
+        return jsonify({"error": f"intents: {e}"}), 400
+    try:
+        rec = verify_postchange(bundle, running, intents or None)
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"error": _client_error(e)}), 500
+    _inc("aegis_postchange_total", status=rec["status"])
+    _LEDGER.append("postchange_verified", run_id=rec["run_id"], change_ref=rec["change_ref"],
+                   status=rec["status"], record_sha256=rec["record_sha256"])
     return jsonify(rec)
 
 

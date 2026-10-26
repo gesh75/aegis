@@ -33,7 +33,8 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
                   model_identity: dict | None = None,
                   change_ref: str | None = None,
                   intents: list[dict] | None = None,
-                  intent_runner=None) -> dict:
+                  intent_runner=None,
+                  inventory_lookup=None) -> dict:
     frameworks = frameworks or ["pci_dss_v4"]
     run_id = uuid.uuid4().hex
     created = datetime.now(timezone.utc).isoformat()
@@ -63,6 +64,12 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
             ) for i, c in enumerate(imported_configs)]
         else:
             configs = backend.generate_config(intent, lab)
+
+        # 2b. source of truth (NetBox): roles raise authority, the rev is sealed ----
+        #     ``inventory_lookup(device_names) -> {roles, inventory_rev, missing}``; it may
+        #     raise PreflightError (e.g. production refuses to run without NetBox).
+        inventory = (inventory_lookup([c["device"] for c in configs])
+                     if inventory_lookup else None)
 
         # 3. static analysis ----------------------------------------------
         bf = backend.batfish_check(configs)
@@ -127,7 +134,7 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
                            devices_affected=diff["devices_affected"],
                            sessions_dropped=len(diff["sessions_dropped"]),
                            converged=twin["converged"]),
-            classify_change(configs),
+            classify_change(configs, roles=(inventory or {}).get("roles")),
             load_max_authorized(),
         )
 
@@ -140,6 +147,7 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
             rollback_plan=plan, decision=decision, reason=reason,
             model_identity=mi, authority=authority, change_ref=change_ref,
             intents=intent_record, verify_errors=verify_errors,
+            inventory=inventory,
         )
     finally:
         if twin_id is not None:

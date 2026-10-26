@@ -5,6 +5,7 @@ AEGIS asserts are both config-checked off the proposed change.
 """
 from __future__ import annotations
 from ._base import ComplianceSignal, control, PASS, FAIL, CONFIG_CHECKED
+from .. import secrets
 
 FRAMEWORK = "pci_dss_v4"
 
@@ -22,15 +23,24 @@ def evaluate(sig: ComplianceSignal) -> list[dict]:
         CONFIG_CHECKED))
 
     # 8.3.2 — strong cryptography for authentication; no plaintext credentials
+    # D2: reversible obfuscation (type 7, $9$) fails by default; AEGIS_REVERSIBLE_SECRETS=report
+    # restores PASS-with-note. Compliance rows are evidence — they do not change the verdict.
     labels = sig.plaintext_secret_labels()
     reversible = sig.reversible_secret_labels()
+    rev_fails = bool(reversible) and secrets.reversible_policy() == "fail"
     note = (f"; reversible obfuscation present ({', '.join(reversible)}) — not strong "
-            "cryptography, review against your key-management policy") if reversible else ""
+            "cryptography" + ("" if rev_fails else
+                              ", review against your key-management policy")) if reversible else ""
+    if labels:
+        evidence = f"plaintext authentication material in config ({', '.join(labels)})"
+    elif rev_fails:
+        evidence = "no plaintext authentication material"
+    else:
+        evidence = "no plaintext authentication material in generated config"
     out.append(control(
         FRAMEWORK, "8.3.2",
-        FAIL if labels else PASS,
-        (f"plaintext authentication material in config ({', '.join(labels)})" if labels
-         else "no plaintext authentication material in generated config") + note,
+        FAIL if labels or rev_fails else PASS,
+        evidence + note,
         CONFIG_CHECKED))
 
     return out
@@ -63,8 +73,20 @@ SELF_TEST = [
                    "grounded_commands": []}],
       "batfish": {"errors": 0, "warnings": 0, "passed": 1, "findings": []}},
      "8.3.2", FAIL),
+    # D2 default (AEGIS_REVERSIBLE_SECRETS=fail): reversible obfuscation fails 8.3.2
     ({"configs": [{"device": "mx1", "vendor": "junos",
                    "config": 'set protocols bgp group G authentication-key "$9$AbCdEf"',
+                   "grounded_commands": []}],
+      "batfish": {"errors": 0, "warnings": 0, "passed": 1, "findings": []}},
+     "8.3.2", FAIL),
+    ({"configs": [{"device": "r1", "vendor": "ios",
+                   "config": "username ops password 7 0822455D0A16",
+                   "grounded_commands": []}],
+      "batfish": {"errors": 0, "warnings": 0, "passed": 1, "findings": []}},
+     "8.3.2", FAIL),
+    # a hash is not reversible: still PASS
+    ({"configs": [{"device": "r1", "vendor": "ios",
+                   "config": "username ops secret 9 $9$nhEmQVczB7dqsO$X.HsgL6x1il0RxkOSSvyQYwucySCt7qFm4v7pqCxkKM",
                    "grounded_commands": []}],
       "batfish": {"errors": 0, "warnings": 0, "passed": 1, "findings": []}},
      "8.3.2", PASS),

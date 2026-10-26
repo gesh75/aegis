@@ -1,0 +1,5 @@
+set security policies from-zone untrust to-zone trust policy temp-vendor match source-address any
+set security policies from-zone untrust to-zone trust policy temp-vendor match destination-address any
+set security policies from-zone untrust to-zone trust policy temp-vendor match application any
+set security policies from-zone untrust to-zone trust policy temp-vendor then permit
+set security nat destination pool web address 10.2.0.99/32
