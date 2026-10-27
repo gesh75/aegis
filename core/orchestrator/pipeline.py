@@ -28,7 +28,7 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
                   frameworks: list[str] | None = None,
                   operator: str = "unknown",
                   source: str = "nl_intent",
-                  approver: str | None = None,
+                  approver: str | None = None,  # an unverified claim: never an approval (step 8)
                   imported_configs: list[dict] | None = None,
                   model_identity: dict | None = None,
                   change_ref: str | None = None,
@@ -105,7 +105,10 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
             converged=twin["converged"],
         )
         needs_approval = guards.approval_required(tier)
-        approval_granted = bool(approver) and needs_approval
+        # Approval is granted ONLY at promotion, by an HMAC token bound to this sealed
+        # bundle (mbDZXhDK). A run-time ``approver`` is a claim nobody verified: it never
+        # flips the verdict and is never sealed as granted_by. (The caller may log it.)
+        approval_granted = False
 
         # 9. rollback plan ------------------------------------------------
         plan = rollback.build_rollback_plan(configs)
@@ -142,8 +145,7 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
             run_id=run_id, created=created, operator=operator, intent=intent,
             source=source, configs=configs, batfish=bf, twin=twin, diff=diff,
             compliance=compliance, tier=tier, needs_approval=needs_approval,
-            approver=approver if approval_granted else None,
-            approval_utc=created if approval_granted else None,
+            approver=None, approval_utc=None,
             rollback_plan=plan, decision=decision, reason=reason,
             model_identity=mi, authority=authority, change_ref=change_ref,
             intents=intent_record, verify_errors=verify_errors,

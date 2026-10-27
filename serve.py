@@ -383,6 +383,10 @@ def preflight_run():
                    authority=bundle["change"]["authority"]["effective"],
                    operator=bundle.get("operator"), change_ref=change_ref,
                    sealed=isinstance(seal, dict),
+                   # a run-time approver is never an approval (mbDZXhDK): keep what was
+                   # claimed, clearly marked unverified
+                   **({"claimed_approver": str(data.get("approver"))[:128],
+                       "claimed_approver_verified": False} if data.get("approver") else {}),
                    intents_failed=(bundle["validation"].get("intents") or {}).get("failed"),
                    intents_errors=(bundle["validation"].get("intents") or {}).get("errors"))
     return jsonify(bundle)

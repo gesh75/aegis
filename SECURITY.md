@@ -40,7 +40,7 @@ and it enforces the stricter request-time rules listed below.
 Production request-time rules:
 
 - Every run needs a `change_ref`.
-- A run-time `approver` is rejected, because approval only happens at promotion.
+- A run-time `approver` is rejected, because approval only happens at promotion. (Community mode ignores it: it is never sealed as `granted_by`, never changes the verdict, and the ledger keeps it as `claimed_approver` with `claimed_approver_verified: false`.)
 - Approvals are HMAC-only (this is now true in every mode: an unset `AEGIS_APPROVE_KEY` denies all approvals).
 - Only v2 (bundle-bound) tokens can be minted.
 - Exports and promotion require a valid seal. Blocked-verdict evidence is the one exception: it stays exportable and is labelled UNSEALED.

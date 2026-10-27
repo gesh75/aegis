@@ -21,6 +21,8 @@
       backend by default even with ANTHROPIC_API_KEY; HttpBackend refuses a non-loopback
       model URL by default
   H14 guard-rejected preflights and denied mints are recorded in the ledger
+  H15 a run-time ``approver`` name is never a granted approval: the verdict stays
+      needs_approval, granted_by stays null, and the ledger records the claim as unverified
   H10 offline CLI (python -m aegis.verify): genuine seal PASS (exit 0), forged FAIL
       (exit 1), missing seal with --pubkey FAIL, tampered ledger FAIL
 
@@ -547,6 +549,44 @@ def rejections_ledgered() -> None:
         os.environ.pop("AEGIS_API_KEY", None)
 
 
+def runtime_approver_not_granted() -> None:
+    """mbDZXhDK: only an HMAC token (bound to the sealed bundle) is an approval. A name in
+    the run request body must neither flip the verdict nor be sealed as granted_by."""
+    from ..serve import app, _LEDGER
+    # library: a high-tier change with a claimed approver
+    b = run_preflight("add vlan 10 to leaf-1", backend=SimulatorBackend(), lab="single",
+                      operator="alice", approver="cto@corp")
+    ap = b["change"]["approval"]
+    check("H15.lib.high_tier", b["change"]["risk_tier"] == "high" and ap["required"] is True,
+          str(b["change"]["risk_tier"]))
+    check("H15.lib.verdict_needs_approval", b["verdict"]["decision"] == "needs_approval",
+          str(b["verdict"]))
+    check("H15.lib.granted_by_null", ap.get("granted_by") is None and ap.get("granted_utc") is None,
+          str(ap))
+    check("H15.lib.name_not_sealed", "cto@corp" not in json.dumps(b), "claimed approver in bundle")
+    # HTTP, community mode (the default)
+    c = app.test_client()
+    r = c.post("/api/preflight/run", json={"intent": "add vlan 10 to leaf-1", "lab": "single",
+                                           "operator": "alice", "approver": "cto@corp"})
+    hb = r.get_json() or {}
+    hap = (hb.get("change") or {}).get("approval") or {}
+    check("H15.http.verdict_needs_approval", r.status_code == 200
+          and (hb.get("verdict") or {}).get("decision") == "needs_approval",
+          f"{r.status_code} {(hb.get('verdict') or {})}")
+    check("H15.http.granted_by_null", hap.get("granted_by") is None, str(hap))
+    pdf = c.post("/api/preflight/evidence/pdf", json=hb)
+    check("H15.http.pdf_renders", pdf.status_code == 200, str(pdf.status_code))
+    rows = [e for e in _LEDGER.entries()
+            if e.get("kind") == "preflight_run" and e.get("run_id") == hb.get("run_id")]
+    check("H15.ledger.claim_recorded_unverified", len(rows) == 1
+          and rows[0].get("claimed_approver") == "cto@corp"
+          and rows[0].get("claimed_approver_verified") is False, str(rows))
+    # the approver claim never unlocks promotion either (no token -> no approval)
+    r = c.post("/api/preflight/promote", json={"bundle": hb, "approver": "cto@corp",
+                                               "connector": "dry_run"})
+    check("H15.http.promote_denied", r.status_code == 403, f"{r.status_code}")
+
+
 def main() -> int:
     airgap_default()
     rejections_ledgered()
@@ -557,6 +597,7 @@ def main() -> int:
     production_startup()
     evidence_honesty()
     http_contract()
+    runtime_approver_not_granted()
     if FAILS:
         print("\n=== HARDENING TEST: FAIL ===")
         for f in FAILS:
