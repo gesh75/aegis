@@ -42,6 +42,7 @@ from aegis.core.risk.authority import peer_as_policy
 from aegis.core.integrations import IntegrationError
 from aegis.core.integrations import netbox, servicenow
 from aegis.core.postchange import verify_postchange
+from aegis.core import secretref
 from aegis.evidence.secrets import reversible_policy
 
 _UI = os.path.join(os.path.dirname(__file__), "ui", "preflight_screen.html")
@@ -136,6 +137,24 @@ for _policy in (peer_as_policy, reversible_policy):  # D1 / D2 switches: a typo 
     except ValueError as _exc:
         raise SystemExit(f"[aegis.policy] {_exc}") from _exc
 _LEDGER = Ledger(os.environ.get("AEGIS_LEDGER_PATH") or None, sink=sink_from_env())
+
+
+def _load_secret_store():
+    """D3 store, probed once at startup (write + read-back of a canary) so a dead vault or
+    a wrong key fails the start, not the first change."""
+    try:
+        store = secretref.store_from_env()
+        if store is not None:
+            probe = store.ref_for("startup-probe", "aegis-canary")
+            store.put(probe, "aegis-canary")
+            if store.get(probe) != "aegis-canary":
+                raise secretref.SecretStoreError("canary read-back mismatch")
+        return store
+    except secretref.SecretStoreError as exc:
+        raise SystemExit(f"[aegis.secrets] {exc}") from exc
+
+
+_SECRET_STORE = _load_secret_store()
 
 
 def _load_baseline_intents() -> list[dict]:
@@ -247,6 +266,7 @@ def status():
                            else "unconfigured"),
         "baseline_intents": len(_BASELINE_INTENTS),
         "egress": "none",  # the preflight run; integrations are separate, ledgered calls
+        "secret_refs": _SECRET_STORE.name if _SECRET_STORE is not None else "off",
         "integrations": {"servicenow": servicenow.configured(),
                          "netbox": netbox.configured()},
     })
@@ -361,7 +381,8 @@ def preflight_run():
             approver=data.get("approver") or None,
             source=source, imported_configs=imported, change_ref=change_ref,
             intents=intents or None,
-            inventory_lookup=_netbox_lookup if netbox.configured() else None)
+            inventory_lookup=_netbox_lookup if netbox.configured() else None,
+            secret_store=_SECRET_STORE)
     except PreflightError as e:
         _inc("aegis_preflight_runs_total", decision="guard_rejected")
         return _reject_run({"error": str(e), "stage": "guard"}, 400)
@@ -570,7 +591,7 @@ def preflight_promote():
             # a self-hashed forgery fails G0 before any other rule runs.
             seal=bundle.get("seal"), verifier=_VERIFIER, require_seal=True,
             require_verified_approval=runtime.is_production(),
-            ledger=_LEDGER,
+            ledger=_LEDGER, secret_store=_SECRET_STORE,
         )
     except PromoteDenied as e:
         _inc("aegis_promotions_total", status="denied")

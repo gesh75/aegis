@@ -4,8 +4,9 @@ Community keeps every honesty-tier fallback so the offline demo and CI work with
 setup. Production removes them:
 
   * refuses to start without AEGIS_API_KEY, AEGIS_APPROVE_KEY, AEGIS_SEAL_KEY,
-    AEGIS_LEDGER_PATH and AEGIS_APPROVER_KEYS (no open API, no presence-only approvals,
-    no ephemeral seals, no in-memory audit trail, no operator-minted approvals)
+    AEGIS_LEDGER_PATH, AEGIS_APPROVER_KEYS, AEGIS_SECRET_STORE and AEGIS_SECRET_KEY (no
+    open API, no presence-only approvals, no ephemeral seals, no in-memory audit trail,
+    no operator-minted approvals, no credential values in evidence bundles)
   * ``asserted-unverified`` approvals are a deny at the gate
   * promotion and evidence export require a valid Ed25519 seal
   * a preflight run must carry a change reference (e.g. a ServiceNow CHG number)
@@ -20,7 +21,9 @@ COMMUNITY = "community"
 PRODUCTION = "production"
 
 _REQUIRED_PRODUCTION_ENV = ("AEGIS_API_KEY", "AEGIS_APPROVE_KEY", "AEGIS_SEAL_KEY",
-                            "AEGIS_LEDGER_PATH", "AEGIS_APPROVER_KEYS")
+                            "AEGIS_LEDGER_PATH", "AEGIS_APPROVER_KEYS",
+                            # D3: no credential value may sit in a production artifact
+                            "AEGIS_SECRET_STORE", "AEGIS_SECRET_KEY")
 
 # Change references: ServiceNow CHG0012345, Jira NETOPS-123, Remedy CRQ000000123456 ...
 # Overridable so each org can pin its own ITSM numbering.

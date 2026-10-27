@@ -26,6 +26,7 @@ import re
 from datetime import datetime, timezone
 
 from ..evidence import junos
+from .secretref import REF_RE
 
 _SKIP = re.compile(r"^(?:!|#|end$|exit$|exit-address-family$|configure(?: terminal)?$|"
                    r"conf t$|commit(?: .*)?$|top$|quit$)", re.IGNORECASE)
@@ -38,6 +39,19 @@ def _norm(line: str) -> str:
 
 def _effective(text: str) -> list[str]:
     return [n for n in (_norm(ln) for ln in (text or "").splitlines()) if n and not _SKIP.match(n)]
+
+
+def _present(ln: str, have: set[str]) -> bool:
+    """Exact line presence. A line carrying a D3 reference matches any running line with
+    the same structure: devices re-encrypt keys on commit (Junos stores $9$, Cisco
+    type 7), so the value can never be compared textually, only its position."""
+    if ln in have:
+        return True
+    if not REF_RE.search(ln):
+        return False
+    value = r'(?:"[^"]*"|[^\s";]+)'
+    pat = re.compile("^" + value.join(re.escape(p) for p in REF_RE.split(ln)) + "$")
+    return any(pat.match(h) for h in have)
 
 
 def _device_check(device: str, vendor: str, candidate: str, running: str | None) -> dict:
@@ -60,7 +74,7 @@ def _device_check(device: str, vendor: str, candidate: str, running: str | None)
                     row["still_present"].append(ln)
             elif ln.startswith(("deactivate ", "activate ")):
                 continue  # state flags are not visible in display-set output
-            elif ln not in have:
+            elif not _present(ln, have):
                 row["missing"].append(ln)
     else:
         have = set(_effective(running))
@@ -68,7 +82,7 @@ def _device_check(device: str, vendor: str, candidate: str, running: str | None)
             if ln.lower().startswith("no "):
                 if _norm(ln[3:]) in have:
                     row["still_present"].append(ln)
-            elif ln not in have:
+            elif not _present(ln, have):
                 row["missing"].append(ln)
     row["status"] = "applied" if not (row["missing"] or row["still_present"]) else "drift"
     row["missing"] = row["missing"][:_MAX_LIST]

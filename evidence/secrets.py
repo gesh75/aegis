@@ -79,12 +79,17 @@ _HASH_PATTERNS: list[re.Pattern] = [
 ]
 
 REDACTED = "<redacted>"
+_REF = "AEGISREF-"   # D3 reference token (core/secretref.py): not a secret, never flagged
+
+
+def _real_hit(rx: re.Pattern, text: str) -> bool:
+    return any(not m.group("s").startswith(_REF) for m in rx.finditer(text))
 
 
 def plaintext_hits(text: str) -> list[str]:
     """Labels (sorted, unique) of cleartext credentials present. Values never returned."""
     t = text or ""
-    return sorted({label for label, rx in PLAINTEXT_PATTERNS if rx.search(t)})
+    return sorted({label for label, rx in PLAINTEXT_PATTERNS if _real_hit(rx, t)})
 
 
 def reversible_policy() -> str:
@@ -99,13 +104,13 @@ def reversible_policy() -> str:
 
 def reversible_hits(text: str) -> list[str]:
     t = text or ""
-    return sorted({label for label, rx in REVERSIBLE_PATTERNS if rx.search(t)})
+    return sorted({label for label, rx in REVERSIBLE_PATTERNS if _real_hit(rx, t)})
 
 
 def _sub_group(rx: re.Pattern, text: str) -> str:
     def repl(m: re.Match) -> str:
-        if m.group("s") == REDACTED:
-            return m.group(0)
+        if m.group("s") == REDACTED or m.group("s").startswith(_REF):
+            return m.group(0)   # already redacted, or a D3 reference (safe to show)
         a, b = m.span("s")
         base = m.start(0)
         whole = m.group(0)

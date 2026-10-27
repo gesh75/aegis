@@ -5,6 +5,27 @@ versioning is [SemVer](https://semver.org).
 
 ## [Unreleased]
 
+### D3: secret references, so no credential value appears in any artifact
+- `core/secretref.py`: with `AEGIS_SECRET_STORE` set, every credential leaves the pipeline
+  as an `AEGISREF-` token. The token is a keyed HMAC bound to the run, so it reveals
+  nothing about the value and cannot be replayed into another run. Covered:
+  - configs, the rollback plan, intent text and findings;
+  - the bundle and seal, the PDF/CAB/OSCAL exports, ServiceNow attachments and the ledger.
+- Values live in an AES-256-GCM file store or Vault/OpenBao KV v2 (perimeter rule
+  applies). If a value would survive tokenization, the run is rejected.
+- Promotion resolves references after the gate and before the single-use token is
+  claimed. A store outage or a swapped value denies the push without burning the
+  approval. The connector receives the real config; the record and ledger keep references.
+- Post-change verify matches referenced lines by position, because devices re-encrypt keys
+  on commit.
+- Production now also requires `AEGIS_SECRET_STORE` and `AEGIS_SECRET_KEY`. The store is
+  probed at startup.
+- `change.secret_refs` is added to the schema (optional). New suite
+  `tests/secretref_test.py` (66 checks, mutation-checked) is in CI.
+- **Correction:** the strategy doc said D3 would lift the D2 PCI 8.3.2 failures on Junos
+  `$9$` keys. It does not. 8.3.2 judges how the device stores the key, so that row is
+  unchanged.
+
 ### Firewall and NAT intents (Juniper SRX, Palo Alto)
 - `firewall_policy`: zone-to-zone **transit** policy on one firewall. Zones resolve to
   every `from_zone` interface through Batfish `interfaceProperties`, and an unknown zone
@@ -57,7 +78,7 @@ versioning is [SemVer](https://semver.org).
 - **Fix:** a Cisco type 9 scrypt hash (`$9$salt$hash`) was misreported as reversible Junos
   `$9$`.
 - Both policy switches are validated at startup, so a typo is fatal.
-- **D3:** the design is recorded in `docs/DESIGN_D3_SECRET_REFERENCES.md`; not implemented.
+- **D3:** the design is recorded in `docs/DESIGN_D3_SECRET_REFERENCES.md` (implemented since, see above).
 - **D5:** DC fabric is recorded as the pilot domain.
 - **D4:** still open; it needs owner input.
 
