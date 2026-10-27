@@ -71,6 +71,13 @@ def _api_key() -> str:
     return (os.environ.get("AEGIS_API_KEY") or "").strip()
 
 
+def _request_identity() -> str | None:
+    """The person behind THIS request, from their own credential in X-Aegis-Approver-Key
+    (the same registry that identifies approvers). Never the request body and never the
+    shared API key, which identifies nobody. None = nobody authenticated (dgV9dC6J)."""
+    return approvers.resolve(request.headers.get("X-Aegis-Approver-Key"))
+
+
 def _guard_api():
     """T1 #10: when AEGIS_API_KEY is set, mutating routes require X-Aegis-Key.
 
@@ -240,7 +247,8 @@ def status():
         "mode": runtime.mode(),
         "api_auth": "required" if _api_key() else "open",
         "approve_hmac": "required" if hmac_configured() else "unset-approvals-denied",
-        "approver_identity": "registry" if approvers.registry_configured() else "asserted",
+        "approver_identity": ("registry" if approvers.registry_configured()
+                              else "unconfigured-approvals-denied"),
         "seal": "pinned" if (os.environ.get("AEGIS_SEAL_KEY") or "").strip() else "ephemeral",
         "ledger": _LEDGER.head()["storage"],
         "intents_engine": ("batfish" if (os.environ.get("AEGIS_BATFISH_HOST") or "").strip()
@@ -304,7 +312,8 @@ def _reject_run(body: dict, code: int):
     data = data if isinstance(data, dict) else {}
     _LEDGER.append("preflight_rejected", stage=body.get("stage", "guard"), http_status=code,
                    reason=str(body.get("error", ""))[:300],
-                   operator=str(data.get("operator") or "")[:128] or None,
+                   operator=_request_identity(),
+                   claimed_operator=str(data.get("operator") or "")[:128] or None,
                    change_ref=str(data.get("change_ref") or "")[:64] or None)
     return jsonify(body), code
 
@@ -357,7 +366,8 @@ def preflight_run():
             (data.get("intent") or "").strip(), backend=SimulatorBackend(),
             lab=(data.get("lab") or "clos-evpn").strip(),
             frameworks=data.get("frameworks") or ["pci_dss_v4"],
-            operator=(data.get("operator") or "community").strip(),
+            # authenticated identity only; the body's "operator" is a claim, ledgered below
+            operator=_request_identity() or approvers.UNAUTHENTICATED,
             approver=data.get("approver") or None,
             source=source, imported_configs=imported, change_ref=change_ref,
             intents=intents or None,
@@ -383,6 +393,8 @@ def preflight_run():
                    authority=bundle["change"]["authority"]["effective"],
                    operator=bundle.get("operator"), change_ref=change_ref,
                    sealed=isinstance(seal, dict),
+                   **({"claimed_operator": str(data.get("operator"))[:128]}
+                      if data.get("operator") else {}),
                    # a run-time approver is never an approval (mbDZXhDK): keep what was
                    # claimed, clearly marked unverified
                    **({"claimed_approver": str(data.get("approver"))[:128],
@@ -494,7 +506,16 @@ def approve_mint():
                                  "bundle (binds config + inventory, enables SoD check)"}), 400
     if isinstance(bundle, dict):
         op = str(bundle.get("operator") or "").strip().lower()
-        if op and op == str(who).strip().lower():
+        if not approvers.identified(op):
+            _inc("aegis_approval_mint_total", result="operator_unauthenticated")
+            _LEDGER.append("approval_mint_denied", run_id=bundle.get("run_id"),
+                           approver=str(who).strip(),
+                           reason="bundle has no authenticated operator")
+            return jsonify({"error": "separation of duties cannot be checked: the bundle has "
+                                     "no authenticated operator identity — the author must "
+                                     "re-run the preflight with their personal credential "
+                                     "(X-Aegis-Approver-Key)"}), 403
+        if op == str(who).strip().lower():
             _inc("aegis_approval_mint_total", result="sod_denied")
             _LEDGER.append("approval_mint_denied", run_id=bundle.get("run_id"),
                            approver=str(who).strip(), reason="separation of duties")

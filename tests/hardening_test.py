@@ -21,6 +21,8 @@
       backend by default even with ANTHROPIC_API_KEY; HttpBackend refuses a non-loopback
       model URL by default
   H14 guard-rejected preflights and denied mints are recorded in the ledger
+  H17 separation of duties uses the AUTHENTICATED operator (recorded from the personal
+      credential, never from the request body) and denies when there is none
   H16 authority HITL/HOTL always needs a verified second-person approval at the gate and is
       recorded as needs_approval in the bundle, whatever the computed risk tier
   H15 a run-time ``approver`` name is never a granted approval: the verdict stays
@@ -334,24 +336,33 @@ def http_contract() -> None:
     key_bob = "bob-personal-credential-123456"
     os.environ["AEGIS_APPROVE_KEY"] = KEY
     os.environ["AEGIS_API_KEY"] = API  # HMAC minting is refused on an unauthenticated server
-    os.environ["AEGIS_APPROVER_KEYS"] = "bob:" + hashlib.sha256(key_bob.encode()).hexdigest()
+    os.environ["AEGIS_APPROVER_KEYS"] = (
+        "bob:" + hashlib.sha256(key_bob.encode()).hexdigest()
+        + ",alice:" + hashlib.sha256(b"alice-cred-0000000000").hexdigest())
     try:
-        r = c.post("/api/approve/mint", json={"approver": "bob", "bundle": bundle},
+        # the author is identified by her own credential (dgV9dC6J); the body names nobody
+        r = c.post("/api/preflight/run", json={"intent": "add vlan 10 to leaf-1", "lab": "single"},
+                   headers={"X-Aegis-Key": API, "X-Aegis-Approver-Key": "alice-cred-0000000000"})
+        authored = r.get_json() or {}
+        check("H7.author_identified", authored.get("operator") == "alice",
+              f"{r.status_code} {authored.get('operator')!r}")
+        r = c.post("/api/approve/mint", json={"approver": "bob", "bundle": authored},
                    headers={"X-Aegis-Key": API})
         check("H7.mint_needs_credential", r.status_code == 401, str(r.status_code))
-        r = c.post("/api/approve/mint", json={"approver": "carol", "bundle": bundle},
+        r = c.post("/api/approve/mint", json={"approver": "carol", "bundle": authored},
                    headers={"X-Aegis-Key": API, "X-Aegis-Approver-Key": key_bob})
         check("H7.body_identity_mismatch", r.status_code == 403, str(r.status_code))
-        r = c.post("/api/approve/mint", json={"bundle": bundle},
+        r = c.post("/api/approve/mint", json={"bundle": authored},
                    headers={"X-Aegis-Key": API, "X-Aegis-Approver-Key": key_bob})
         check("H7.identity_from_credential", r.status_code == 200
               and (r.get_json() or {}).get("approver") == "bob",
               f"{r.status_code} {r.get_data(as_text=True)[:160]}")
-        os.environ["AEGIS_APPROVER_KEYS"] += ",alice:" + hashlib.sha256(b"alice-cred-0000000000").hexdigest()
-        r = c.post("/api/approve/mint", json={"bundle": bundle},
+        r = c.post("/api/approve/mint", json={"bundle": authored},
                    headers={"X-Aegis-Key": API, "X-Aegis-Approver-Key": "alice-cred-0000000000"})
         check("H3.mint_sod_403", r.status_code == 403
-              and "separation of duties" in r.get_data(as_text=True), r.get_data(as_text=True)[:160])
+              and "separation of duties" in r.get_data(as_text=True)
+              and "authenticated operator" not in r.get_data(as_text=True),
+              r.get_data(as_text=True)[:160])
     finally:
         os.environ.pop("AEGIS_APPROVE_KEY", None)
         os.environ.pop("AEGIS_APPROVER_KEYS", None)
@@ -648,6 +659,99 @@ def authority_requires_approval() -> None:
         os.environ.pop("AEGIS_APPROVE_KEY", None)
 
 
+def operator_identity() -> None:
+    """dgV9dC6J: the bundle's operator comes from an authenticated principal, and an empty /
+    unknown operator can neither mint nor promote an approval."""
+    from ..serve import app, _LEDGER
+    c = app.test_client()
+    cred = {"alice": "alice-cred-000000000000", "bob": "bob-cred-00000000000000"}
+    os.environ["AEGIS_APPROVE_KEY"] = KEY
+    os.environ["AEGIS_API_KEY"] = API
+    os.environ["AEGIS_APPROVER_KEYS"] = ",".join(
+        f"{n}:{hashlib.sha256(k.encode()).hexdigest()}" for n, k in cred.items())
+    api = {"X-Aegis-Key": API}
+    body = {"intent": "add vlan 10 to leaf-1", "lab": "single"}
+    try:
+        # 1 — alice authenticates as herself and lies in the body: the body never wins
+        r = c.post("/api/preflight/run", json={**body, "operator": "bob"},
+                   headers={**api, "X-Aegis-Approver-Key": cred["alice"]})
+        ab = r.get_json() or {}
+        check("H17.operator_from_credential", r.status_code == 200 and ab.get("operator") == "alice",
+              f"{r.status_code} operator={ab.get('operator')!r}")
+        r = c.post("/api/approve/mint", json={"bundle": ab},
+                   headers={**api, "X-Aegis-Approver-Key": cred["alice"]})
+        check("H17.author_cannot_mint_for_own_run", r.status_code == 403
+              and "separation of duties" in r.get_data(as_text=True),
+              f"{r.status_code} {r.get_data(as_text=True)[:160]}")
+        r = c.post("/api/approve/mint", json={"bundle": ab},
+                   headers={**api, "X-Aegis-Approver-Key": cred["bob"]})
+        tok = (r.get_json() or {}).get("token")
+        check("H17.second_person_mints", r.status_code == 200 and tok, f"{r.status_code}")
+        r = c.post("/api/preflight/promote", json={"bundle": ab, "approver": "bob",
+                                                   "approval_token": tok, "connector": "dry_run"},
+                   headers=api)
+        check("H17.second_person_promotes", r.status_code == 200
+              and (r.get_json() or {}).get("approval", {}).get("method") == "hmac-sha256",
+              f"{r.status_code} {r.get_data(as_text=True)[:160]}")
+
+        # 2 — no personal credential on the run: the operator is NOT whatever the body says,
+        #     and nobody can approve a run whose author is unknown
+        for claimed in ("carol", "", None):
+            payload = {**body} if claimed is None else {**body, "operator": claimed}
+            r = c.post("/api/preflight/run", json=payload, headers=api)
+            ub = r.get_json() or {}
+            check(f"H17.unauthenticated_run[{claimed!r}]", r.status_code == 200
+                  and ub.get("operator") == "unauthenticated", f"operator={ub.get('operator')!r}")
+        before = _LEDGER.head()["seq"]
+        r = c.post("/api/approve/mint", json={"bundle": ub},
+                   headers={**api, "X-Aegis-Approver-Key": cred["bob"]})
+        check("H17.mint_denied_unauthenticated_operator", r.status_code == 403
+              and "authenticated operator" in r.get_data(as_text=True),
+              f"{r.status_code} {r.get_data(as_text=True)[:160]}")
+        check("H17.mint_denial_ledgered", "approval_mint_denied"
+              in [e["kind"] for e in _LEDGER.entries()[before:]])
+        # the claimed (unverified) operator is kept in the ledger, marked as a claim
+        rows = [e for e in _LEDGER.entries() if e.get("kind") == "preflight_run"
+                and e.get("claimed_operator") == "carol"]
+        check("H17.claimed_operator_ledgered", len(rows) >= 1 and rows[-1].get("operator")
+              == "unauthenticated", str(rows[-1:] if rows else "none"))
+        # a registered approver who omits their credential cannot launder their own run
+        r = c.post("/api/preflight/run", json={**body, "operator": "alice"}, headers=api)
+        lb = r.get_json() or {}
+        r = c.post("/api/approve/mint", json={"bundle": lb},
+                   headers={**api, "X-Aegis-Approver-Key": cred["alice"]})
+        check("H17.omitting_credential_does_not_launder", r.status_code == 403, str(r.status_code))
+    finally:
+        for k in ("AEGIS_APPROVE_KEY", "AEGIS_API_KEY", "AEGIS_APPROVER_KEYS"):
+            os.environ.pop(k, None)
+
+    # gate: an empty / unknown operator is a deny, not a skipped check
+    os.environ["AEGIS_APPROVE_KEY"] = KEY
+    try:
+        base = _needs_approval_bundle()
+        for label, op in (("empty", ""), ("blank", "   "), ("unknown", "unknown"),
+                          ("unauthenticated", "unauthenticated"), ("community", "community"),
+                          ("none", None)):
+            f = copy.deepcopy(base)
+            if op is None:
+                f.pop("operator", None)
+            else:
+                f["operator"] = op
+            f["integrity"]["sha256"] = compute_sha256(f)
+            tok = mint_token_for_bundle("bob", f, ttl_sec=600)
+            d = gate.evaluate(f, approver="bob", approval_token=tok, connector_is_live=False,
+                              allow_live=False)
+            check(f"H17.gate.operator_{label}_denied", not d.allowed
+                  and "authenticated operator" in d.reason, f"{d.allowed} {d.reason}")
+        ok = copy.deepcopy(base)
+        tok = mint_token_for_bundle("bob", ok, ttl_sec=600)
+        d = gate.evaluate(ok, approver="bob", approval_token=tok, connector_is_live=False,
+                          allow_live=False)
+        check("H17.gate.named_operator_second_person_allowed", d.allowed, d.reason)
+    finally:
+        os.environ.pop("AEGIS_APPROVE_KEY", None)
+
+
 def main() -> int:
     airgap_default()
     rejections_ledgered()
@@ -660,6 +764,7 @@ def main() -> int:
     http_contract()
     runtime_approver_not_granted()
     authority_requires_approval()
+    operator_identity()
     if FAILS:
         print("\n=== HARDENING TEST: FAIL ===")
         for f in FAILS:

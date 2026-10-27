@@ -25,6 +25,7 @@ API client depend on:
 Usage:  python3 -m aegis.tests.api_test
 """
 from __future__ import annotations
+import hashlib
 import os
 import sys
 
@@ -209,8 +210,26 @@ def main() -> int:
             return c.post(url, headers=auth, **kw)
 
         serve._require_api_key_for_hmac()  # both keys set: must not raise
-        r = post("/api/approve/mint",
-                   json={"approver": "noc-lead", "bundle_sha256": sha, "ttl_sec": 600})
+        # approvals need two identified people (dgV9dC6J): the author authenticates with their
+        # own credential on the run (the body's operator is never trusted), the approver with
+        # theirs at mint
+        author_cred, noc_cred = "ci-author-cred-0000000", "noc-lead-cred-0000000"
+        os.environ["AEGIS_APPROVER_KEYS"] = ",".join(
+            f"{n}:{hashlib.sha256(k.encode()).hexdigest()}"
+            for n, k in (("ci-author", author_cred), ("noc-lead", noc_cred)))
+        noc = {**auth, "X-Aegis-Approver-Key": noc_cred}
+
+        def mint(**kw):
+            return c.post("/api/approve/mint", headers=noc, **kw)
+
+        r = c.post("/api/preflight/run", headers={**auth, "X-Aegis-Approver-Key": author_cred},
+                   json={"intent": "add vlan 10 to leaf-1", "lab": "single",
+                         "frameworks": ["pci_dss_v4"]})
+        check("run.authored.operator", (r.get_json() or {}).get("operator") == "ci-author",
+              str((r.get_json() or {}).get("operator")))
+        bundle = r.get_json() if r.status_code == 200 else {}
+        sha = (bundle.get("integrity") or {}).get("sha256", "")
+        r = mint(json={"approver": "noc-lead", "bundle_sha256": sha, "ttl_sec": 600})
         check("mint.keyed.200", r.status_code == 200, f"{r.status_code} {r.get_data(as_text=True)[:160]}")
         minted_body = r.get_json() or {}
         minted = minted_body.get("token") if r.status_code == 200 else None
@@ -240,8 +259,7 @@ def main() -> int:
                           (rec.get("approval") or {}).get("method") == "hmac-sha256",
                           str(rec.get("approval")))
         if bundle:
-            r = post("/api/approve/mint",
-                       json={"approver": "noc-lead", "bundle": bundle, "ttl_sec": 600})
+            r = mint(json={"approver": "noc-lead", "bundle": bundle, "ttl_sec": 600})
             check("mint.v2.bundle.200", r.status_code == 200,
                   f"{r.status_code} {r.get_data(as_text=True)[:160]}")
             minted_v2 = (r.get_json() or {}) if r.status_code == 200 else {}
@@ -255,8 +273,7 @@ def main() -> int:
                   str(tok_v2)[:40])
             tampered = dict(bundle)
             tampered["change"] = dict(bundle.get("change") or {}, risk_tier="low")
-            r = post("/api/approve/mint",
-                       json={"approver": "noc-lead", "bundle": tampered, "ttl_sec": 600})
+            r = mint(json={"approver": "noc-lead", "bundle": tampered, "ttl_sec": 600})
             check("mint.v2.tampered.422", r.status_code == 422, str(r.status_code))
             if tok_v2:
                 r = post("/api/preflight/promote",
@@ -286,6 +303,7 @@ def main() -> int:
     finally:
         os.environ.pop("AEGIS_APPROVE_KEY", None)
         os.environ.pop("AEGIS_API_KEY", None)
+        os.environ.pop("AEGIS_APPROVER_KEYS", None)
 
     if FAILS:
         print("\n=== API ENDPOINT TEST: FAIL ===")

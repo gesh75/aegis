@@ -26,6 +26,8 @@ function apiHeaders(){
   const h={"Content-Type":"application/json"};
   const k=(document.getElementById('apiKey').value||sessionStorage.getItem('aegisKey')||'').trim();
   if(k) h["X-Aegis-Key"]=k;
+  const p=(document.getElementById('personalKey').value||sessionStorage.getItem('aegisPersonalKey')||'').trim();
+  if(p) h["X-Aegis-Approver-Key"]=p;
   return h;
 }
 
@@ -207,6 +209,8 @@ document.getElementById('mode').addEventListener('change', modeHint);
 document.getElementById('go').addEventListener('click', runPreflight);
 document.getElementById('apiKey').addEventListener('change',
   e => sessionStorage.setItem('aegisKey', e.target.value));
+document.getElementById('personalKey').addEventListener('change',
+  e => sessionStorage.setItem('aegisPersonalKey', e.target.value));
 document.addEventListener('click', e => {
   if (e.target && e.target.id === 'pdfBtn') downloadPdf();
 });

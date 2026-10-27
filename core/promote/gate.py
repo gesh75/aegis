@@ -14,7 +14,9 @@ Rules (all must hold to ALLOW):
                  risk tier (a zero-impact peering change is still a human decision)
   G4  live:      using the live connector additionally requires explicit opt-in (allow_live)
   G5  ceiling:   re-derive required ≤ max_authorized at promote time. No self-escalation.
-  SoD separation of duties: the approver may not be the change's operator (author).
+  SoD separation of duties: the approver may not be the change's operator (author), and the
+                 bundle must carry an authenticated operator to compare against (an empty or
+                 placeholder operator is a deny, not a skipped check).
 
 Approval tokens (T1 #9 / #24): G2/G3 require an HMAC-SHA256 token (``AEGIS_APPROVE_KEY``)
 bound to this bundle's sha256 + the approver identity + an expiry. v2 tokens also bind
@@ -27,6 +29,7 @@ from dataclasses import dataclass
 from ...evidence.bundler import verify
 from ..risk import Tier, authorize, load_max_authorized, requires_approval
 from ..seal import verify_seal
+from .approvers import identified
 from .tokens import Approval, config_digest, inventory_digest, verify_approval
 
 
@@ -102,7 +105,12 @@ def evaluate(bundle: dict, *, approver: str | None, approval_token: str | None,
 
     operator = str(bundle.get("operator") or "").strip().lower()      # SoD
     needs = decision == "needs_approval" or tier in ("medium", "high") or needs_human
-    if needs and operator and operator == str(approver or "").strip().lower():
+    if needs and not identified(operator):
+        # no authenticated author to compare the approver with: deny, never skip (dgV9dC6J)
+        return _deny("separation of duties cannot be established: the bundle has no "
+                     "authenticated operator identity — re-run the preflight as an "
+                     "identified person (personal credential)")
+    if needs and operator == str(approver or "").strip().lower():
         return _deny("separation of duties: the approver authored this change "
                      f"(operator {operator!r}) — a second person must approve")
 

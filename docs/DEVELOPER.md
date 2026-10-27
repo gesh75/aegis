@@ -120,7 +120,11 @@ was previously under-counted; do not compare old vs new `bgp_sessions` numbers b
 4. G4 — live connector needs `AEGIS_PROMOTE_ALLOW_LIVE=1`
 5. G5 — re-load ceiling and `authorize(required, ceiling)`. Missing / unknown
    `change.authority` → deny.
-6. SoD — when approval is required, approver ≠ `bundle.operator`.
+6. SoD — when approval is required, approver ≠ `bundle.operator`, and `bundle.operator` must
+   be an **authenticated** identity. The server records it from the caller's personal
+   credential (`X-Aegis-Approver-Key`), never from the request body; a run without one is
+   sealed as `unauthenticated`. An empty / `unknown` / `unauthenticated` / `community`
+   operator is a **deny** at mint and at the gate, not a skipped check.
 7. Single-use — with a `ledger`, an HMAC token is claimed before the first push. A replay
    → deny.
 
@@ -172,8 +176,11 @@ credential.
 
 ```bash
 H=(-H "Content-Type: application/json" -H "X-Aegis-Key: $AEGIS_API_KEY")
-# 1. operator runs the preflight; the response IS the sealed bundle (seal under .seal)
-curl -s "${H[@]}" -d '{"intent":"add vlan 10 to leaf-1","operator":"alice","change_ref":"CHG0001234"}' \
+# 1. the author runs the preflight with THEIR OWN credential; the response IS the sealed
+#    bundle (seal under .seal). The server records the operator from that credential and
+#    ignores any "operator" in the body (kept in the ledger as claimed_operator).
+curl -s "${H[@]}" -H "X-Aegis-Approver-Key: $AUTHOR_CRED" \
+  -d '{"intent":"add vlan 10 to leaf-1","change_ref":"CHG0001234"}' \
   http://127.0.0.1:8088/api/preflight/run > bundle.json
 # 2. a DIFFERENT person mints a v2 token bound to that bundle's config + inventory
 jq '{bundle: .}' bundle.json | curl -s "${H[@]}" -H "X-Aegis-Approver-Key: $MY_APPROVER_CRED" \
@@ -188,6 +195,7 @@ jq -n --slurpfile b bundle.json --slurpfile t token.json \
 |---|---|---|
 | mint **401** | Missing or unknown `X-Aegis-Approver-Key`. The denial is ledgered. | The approver uses their own credential. |
 | mint **403** "separation of duties" | The approver is the bundle's `operator`. | A second person approves. |
+| mint **403** "no authenticated operator" | The run carried no personal credential, so its author is unknown and SoD cannot be checked. The same bundle is a deny at promotion. | The author re-runs the preflight with their `X-Aegis-Approver-Key` (the UI has a "your credential" field). |
 | mint **422** | The bundle was edited after the run (sha256 mismatch). | Re-run the preflight. |
 | mint **503** | The HMAC key is unset, or the API key is unset. | Set both keys. |
 | promote **403** G0 | The seal is missing, foreign, or mismatched. | Use the bundle exactly as `/run` returned it. |
