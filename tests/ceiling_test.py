@@ -131,13 +131,25 @@ def test_gate_g5_blocks_block_authority_even_when_otherwise_promotable() -> None
 
 
 def test_gate_g5_allows_within_ceiling() -> None:
-    b = _b("shut interface ethernet-1/1")
+    b = _b("shut interface ethernet-1/1", operator="ci")
     if b["change"]["authority"]["required"] == "block":
         return  # extremely unlikely for this intent; skip rather than assert a false case
     b["verdict"]["decision"] = "ship_ready"
     b["change"]["risk_tier"] = "low"
     _reseal(b)
-    d = gate.evaluate(b, approver="noc-lead", approval_token="t", connector_is_live=False, allow_live=False)
+    # HITL/HOTL authority needs a verified approval at the gate whatever the risk tier
+    # (YzNoXPaU), so give it a real token; G5 must then allow it within the ceiling.
+    old_key = os.environ.get("AEGIS_APPROVE_KEY")
+    os.environ["AEGIS_APPROVE_KEY"] = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+    try:
+        tok = mint_token_for_bundle("noc-lead", b)
+        d = gate.evaluate(b, approver="noc-lead", approval_token=tok, connector_is_live=False,
+                          allow_live=False)
+    finally:
+        if old_key is None:
+            os.environ.pop("AEGIS_APPROVE_KEY", None)
+        else:
+            os.environ["AEGIS_APPROVE_KEY"] = old_key
     assert d.allowed, d.reason
 
 

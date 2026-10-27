@@ -21,6 +21,8 @@
       backend by default even with ANTHROPIC_API_KEY; HttpBackend refuses a non-loopback
       model URL by default
   H14 guard-rejected preflights and denied mints are recorded in the ledger
+  H16 authority HITL/HOTL always needs a verified second-person approval at the gate and is
+      recorded as needs_approval in the bundle, whatever the computed risk tier
   H15 a run-time ``approver`` name is never a granted approval: the verdict stays
       needs_approval, granted_by stays null, and the ledger records the claim as unverified
   H10 offline CLI (python -m aegis.verify): genuine seal PASS (exit 0), forged FAIL
@@ -587,6 +589,65 @@ def runtime_approver_not_granted() -> None:
     check("H15.http.promote_denied", r.status_code == 403, f"{r.status_code}")
 
 
+def authority_requires_approval() -> None:
+    """YzNoXPaU: a zero-impact peering change is risk_tier=low yet authority HITL. The sealed
+    record and the gate must both say a person has to approve it."""
+    nbr = [{"device": "leaf-1", "vendor": "frr", "config": " neighbor 10.0.0.9 remote-as 65020",
+            "grounded_commands": []}]
+    low = None
+    for lab in ("y", "z", "q", "w", "v", "u", "t", "s", "r", "p"):
+        b = run_preflight("", backend=SimulatorBackend(), lab=lab, source="config_import",
+                          imported_configs=nbr, operator="alice")
+        if b["change"]["risk_tier"] == "low" and b["change"]["authority"]["required"] == "hitl":
+            low = b
+            break
+    check("H16.found_low_risk_hitl_bundle", low is not None, "sim search found none")
+    if low is None:
+        return
+    check("H16.pipeline.needs_approval_recorded", low["change"]["approval"]["required"] is True,
+          str(low["change"]["approval"]))
+    check("H16.pipeline.verdict_needs_approval", low["verdict"]["decision"] == "needs_approval",
+          str(low["verdict"]))
+
+    def forced(required: str) -> dict:
+        """The same change as a (hypothetical) ship_ready/low bundle with the given authority,
+        re-sealed -- exercises the GATE rule on its own, independent of the pipeline."""
+        f = copy.deepcopy(low)
+        f["verdict"] = {"decision": "ship_ready", "reason": "forced"}
+        f["change"]["approval"] = {"required": False, "granted_by": None, "granted_utc": None}
+        f["change"]["authority"]["required"] = required
+        f["change"]["authority"]["effective"] = required
+        f["integrity"]["sha256"] = compute_sha256(f)
+        return f
+
+    kw = dict(connector_is_live=False, allow_live=False)
+    os.environ["AEGIS_APPROVE_KEY"] = KEY
+    try:
+        for req in ("hitl", "hotl"):
+            f = forced(req)
+            d = gate.evaluate(f, approver=None, approval_token=None, **kw)
+            check(f"H16.gate.{req}_without_approval_denied", not d.allowed
+                  and req.upper() in d.reason and "approval" in d.reason, f"{d.allowed} {d.reason}")
+            d = gate.evaluate(f, approver="bob", approval_token="junk", **kw)
+            check(f"H16.gate.{req}_random_token_denied", not d.allowed, d.reason)
+            tok = mint_token_for_bundle("bob", f, ttl_sec=600)
+            d = gate.evaluate(f, approver="bob", approval_token=tok, **kw)
+            check(f"H16.gate.{req}_verified_approval_allowed", d.allowed
+                  and d.approval_method == "hmac-sha256", f"{d.allowed} {d.reason}")
+            tok_a = mint_token_for_bundle("alice", f, ttl_sec=600)
+            d = gate.evaluate(f, approver="alice", approval_token=tok_a, **kw)
+            check(f"H16.gate.{req}_self_approval_denied", not d.allowed
+                  and "separation of duties" in d.reason, f"{d.allowed} {d.reason}")
+        # control: AUTO needs no approval; BLOCK stays a ceiling denial
+        d = gate.evaluate(forced("auto"), approver=None, approval_token=None, **kw)
+        check("H16.gate.auto_needs_no_approval", d.allowed, d.reason)
+        d = gate.evaluate(forced("block"), approver=None, approval_token=None, **kw)
+        check("H16.gate.block_still_ceiling_denied", not d.allowed
+              and "self-escalation" in d.reason.lower(), d.reason)
+    finally:
+        os.environ.pop("AEGIS_APPROVE_KEY", None)
+
+
 def main() -> int:
     airgap_default()
     rejections_ledgered()
@@ -598,6 +659,7 @@ def main() -> int:
     evidence_honesty()
     http_contract()
     runtime_approver_not_granted()
+    authority_requires_approval()
     if FAILS:
         print("\n=== HARDENING TEST: FAIL ===")
         for f in FAILS:

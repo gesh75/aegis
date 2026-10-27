@@ -112,7 +112,11 @@ was previously under-counted; do not compare old vs new `bgp_sessions` numbers b
    mismatched seal → deny.
 1. G1 — `bundler.verify` (sha256, `seal` excluded from the hash)
 2. G2 — `blocked` never promotes; `needs_approval` needs approver + **verified** token
-3. G3 — medium/high risk needs approver + **verified** token
+3. G3 — medium/high risk needs approver + **verified** token, and so does any change whose
+   sealed `change.authority.required` is HITL or HOTL, **whatever the risk tier** (a
+   zero-impact `remote-as` change is `risk_tier: low` yet still needs a second person).
+   `run_preflight` computes the authority first and records such a change as
+   `approval.required: true` with verdict `needs_approval`, so the bundle and the gate agree.
 4. G4 — live connector needs `AEGIS_PROMOTE_ALLOW_LIVE=1`
 5. G5 — re-load ceiling and `authorize(required, ceiling)`. Missing / unknown
    `change.authority` → deny.

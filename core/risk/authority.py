@@ -210,6 +210,12 @@ def authorize(required: Tier, max_authorized: Tier) -> AuthorityDecision:
                              allowed=allowed, effective=effective, reason=reason)
 
 
+def requires_approval(required: Tier) -> bool:
+    """HITL / HOTL always need a person's approval, whatever the risk tier (YzNoXPaU).
+    AUTO needs none; BLOCK is denied outright at the ceiling, never approved."""
+    return required in (Tier.HITL, Tier.HOTL)
+
+
 _DEFAULT_MAX_AUTHORIZED = Tier.HOTL
 
 
