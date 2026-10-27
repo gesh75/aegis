@@ -5,6 +5,21 @@ versioning is [SemVer](https://semver.org).
 
 ## [Unreleased]
 
+### Ledger: single-use approvals and the hash chain are multi-process safe
+- Every file-backed write now takes an exclusive `flock` and first **catches up** on what
+  other processes appended, verifying the chain as it goes. Only then does it check the
+  single-use claim and append. Before this, each process kept its own head, sequence and
+  used-token set. With several workers on one `AEGIS_LEDGER_PATH`, a 6-process race let
+  **all six** claim the same approval token and forked the chain. Raised in the PR #42
+  review.
+- Fail closed: an edited line, a truncated file, or a partial trailing line from a
+  crashed writer raises `LedgerError`, and nothing is appended after the break.
+- New suite `tests/ledger_mp_test.py` (6 real processes) is in CI. It fails against the
+  previous ledger and passes now.
+- The Dockerfile keeps one worker by default because of the ephemeral community seal key.
+  Scale-out needs a pinned `AEGIS_SEAL_KEY`, a shared ledger, and a filesystem with
+  working `flock`.
+
 ### Firewall and NAT intents (Juniper SRX, Palo Alto)
 - `firewall_policy`: zone-to-zone **transit** policy on one firewall. Zones resolve to
   every `from_zone` interface through Batfish `interfaceProperties`, and an unknown zone
