@@ -9,6 +9,9 @@
       raise LedgerError and nothing is appended after the break
   M4  restart: a new instance sees every claim made by any process
   M5  memory mode is unchanged (in-process only)
+  R*  review (PR #46): head() reports a broken ledger instead of raising; the SIEM sink
+      runs outside the lock; short writes fail closed; non-ASCII is a LedgerError;
+      readers wait for an in-flight append (shared flock)
 
 Usage:  python3 -m aegis.tests.ledger_mp_test
 """
@@ -166,15 +169,112 @@ def fail_closed() -> None:
             check("M3.truncation_refused", True)
 
 
+def review_findings() -> None:
+    """PR #46 review: head() reports (not raises) a broken ledger; the sink runs outside
+    the lock; a short write leaves state untouched and the next write fails closed;
+    non-ASCII bytes are a LedgerError; readers never see a half-written line."""
+    import threading
+    import time
+    with tempfile.TemporaryDirectory() as td:
+        path = os.path.join(td, "l.jsonl")
+        led = Ledger(path)
+        led.append("e")
+        with open(path, "ab") as fh:
+            fh.write(b'{"partial": ')
+        h = led.head()
+        check("R7.head_reports_broken_not_raises", h["integrity"].startswith("broken"), str(h))
+
+    with tempfile.TemporaryDirectory() as td:
+        path = os.path.join(td, "l.jsonl")
+        led = Ledger(path)
+        led.append("e")
+        with open(path, "ab") as fh:
+            fh.write("{\"x\": \"\u00e9\"}\n".encode("utf-8"))
+        try:
+            led.append("next")
+            check("R5.non_ascii_is_ledger_error", False, "appended")
+        except LedgerError:
+            check("R5.non_ascii_is_ledger_error", True)
+
+    with tempfile.TemporaryDirectory() as td:
+        path = os.path.join(td, "l.jsonl")
+        held = []
+
+        def slow_sink(entry):
+            time.sleep(0.5)
+        slow = Ledger(path, sink=slow_sink)
+        fast = Ledger(path)
+        t = threading.Thread(target=lambda: slow.append("slow"))
+        t.start()
+        time.sleep(0.1)
+        t0 = time.monotonic()
+        fast.append("fast")
+        held.append(time.monotonic() - t0)
+        t.join()
+        check("R3.sink_outside_lock", held[0] < 0.3, f"{held[0]:.2f}s")
+
+    # R2: a short write raises, leaves the instance state untouched, and the partial
+    # line it left behind fails the next write closed (never a "successful" claim)
+    import fcntl
+    from ..evidence import ledger as ledger_mod
+    with tempfile.TemporaryDirectory() as td:
+        path = os.path.join(td, "l.jsonl")
+        led = Ledger(path)
+        led.append("e")
+        real_write, calls = os.write, []
+
+        def short_write(fd, data):
+            calls.append(1)
+            if len(calls) == 1:
+                return real_write(fd, bytes(data[:10]))
+            raise OSError(28, "No space left on device")
+        ledger_mod.os.write = short_write
+        try:
+            try:
+                led.claim_token("s" * 64)
+                check("R2.short_write_raises", False, "claimed")
+            except OSError:
+                check("R2.short_write_raises", True)
+        finally:
+            ledger_mod.os.write = real_write
+        check("R2.state_untouched", led.head()["seq"] == 1 and "s" * 64 not in led._used,  # noqa: SLF001
+              str(led.head()))
+        try:
+            led.append("after")
+            check("R2.next_write_fails_closed", False, "appended after partial line")
+        except LedgerError:
+            check("R2.next_write_fails_closed", True)
+
+    # R4: readers take a SHARED lock, so they wait for an in-flight exclusive append
+    with tempfile.TemporaryDirectory() as td:
+        path = os.path.join(td, "l.jsonl")
+        led = Ledger(path)
+        led.append("e")
+        fd = os.open(path, os.O_RDWR)
+        fcntl.flock(fd, fcntl.LOCK_EX)          # a writer mid-append
+        got = []
+        t = threading.Thread(target=lambda: got.append(led.verify()))
+        t.start()
+        time.sleep(0.3)
+        blocked = not got
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+        t.join(5)
+        check("R4.reader_waits_for_writer", blocked and got and got[0][0], str(got))
+
+
+
 def memory_mode() -> None:
     m = Ledger(None)
     check("M5.memory_claim", m.claim_token("z" * 64) is True and m.claim_token("z" * 64) is False)
     m.append("e")
-    check("M5.memory_chain", m.verify()[0] and m.head()["storage"] == "memory")
+    check("M5.memory_chain", m.verify() == (True, 2, "ok") and m.head()["seq"] == 2
+          and m.head()["storage"] == "memory" and len(m.entries()) == 2, str(m.verify()))
 
 
 def main() -> int:
     race()
+    review_findings()
     same_process()
     fail_closed()
     memory_mode()

@@ -146,8 +146,12 @@ class Ledger:
         if not data.endswith(b"\n"):
             raise LedgerError(f"ledger has a partial line after entry {self._seq} "
                               "(interrupted write?)")
+        try:
+            text = data.decode("ascii")
+        except UnicodeDecodeError as exc:
+            raise LedgerError(f"ledger has non-ASCII bytes after entry {self._seq}") from exc
         head, seq, used = self._head, self._seq, set()
-        for raw in data.decode("ascii").splitlines():
+        for raw in text.splitlines():
             if not raw.strip():
                 continue
             try:
@@ -168,8 +172,18 @@ class Ledger:
     def append(self, kind: str, **fields) -> dict:
         with self._lock:
             if self.path:
-                return self._with_file(lambda fd: self._append_locked(kind, fields, fd))
-            return self._append_locked(kind, fields)
+                entry = self._with_file(lambda fd: self._append_locked(kind, fields, fd))
+            else:
+                entry = self._append_locked(kind, fields)
+        self._emit(entry)                   # SIEM I/O never holds the ledger lock
+        return entry
+
+    def _emit(self, entry: dict) -> None:
+        if self.sink is not None:
+            try:
+                self.sink(entry)
+            except Exception:  # noqa: BLE001 — SIEM outage must not block the change path
+                self.sink_failures += 1
 
     def _append_locked(self, kind: str, fields: dict, fd: int | None = None) -> dict:
         entry = {
@@ -183,17 +197,12 @@ class Ledger:
         entry["entry_sha256"] = entry_hash(entry)
         if fd is not None:
             line = (json.dumps(entry, sort_keys=True, ensure_ascii=True) + "\n").encode("ascii")
-            os.write(fd, line)
-            os.fsync(fd)
+            _write_all(fd, line)            # raises on a short/failed write: state untouched,
+            os.fsync(fd)                    # and the partial line fails the next catch-up
             self._offset += len(line)
         else:
             self._entries.append(entry)
         self._head, self._seq = entry["entry_sha256"], entry["seq"]
-        if self.sink is not None:
-            try:
-                self.sink(entry)
-            except Exception:  # noqa: BLE001 — SIEM outage must not block the change path
-                self.sink_failures += 1
         return entry
 
     def claim_token(self, token_sha256: str, **context) -> bool:
@@ -202,18 +211,20 @@ class Ledger:
         if not token_sha256:
             return False
 
-        def claim(fd: int | None) -> bool:
+        def claim(fd: int | None):
             if token_sha256 in self._used:
-                return False
-            self._append_locked("approval_consumed",
-                                {"token_sha256": token_sha256, **context}, fd)
+                return None
+            entry = self._append_locked("approval_consumed",
+                                        {"token_sha256": token_sha256, **context}, fd)
             self._used.add(token_sha256)
-            return True
+            return entry
 
         with self._lock:
-            if self.path:
-                return self._with_file(claim)
-            return claim(None)
+            entry = self._with_file(claim) if self.path else claim(None)
+        if entry is None:
+            return False
+        self._emit(entry)
+        return True
 
     # ── read ────────────────────────────────────────────────────────────
     def entries(self) -> list[dict]:
@@ -223,10 +234,17 @@ class Ledger:
             return list(self._entries)
 
     def head(self) -> dict:
+        """Shared head for status/metrics. Never raises: a broken ledger is REPORTED
+        (``integrity``) here, refused only on write, so /api/ledger/verify can still answer
+        409 with the reason and /metrics keeps working."""
+        integrity = "ok"
         if self.path and os.path.exists(self.path):
-            with self._lock:            # report the shared head, not this process's view
-                self._with_file(lambda fd: None)
-        return {"seq": self._seq, "head_sha256": self._head,
+            try:
+                with self._lock:        # report the shared head, not this process's view
+                    self._with_file(lambda fd: None)
+            except LedgerError as exc:
+                integrity = f"broken: {exc}"
+        return {"seq": self._seq, "head_sha256": self._head, "integrity": integrity,
                 "storage": "file" if self.path else "memory",
                 "anchor": "syslog" if self.sink is not None else "none",
                 "anchor_failures": self.sink_failures}
@@ -237,12 +255,30 @@ class Ledger:
         return verify_entries(self.entries())
 
 
+def _write_all(fd: int, data: bytes) -> None:
+    view = memoryview(data)
+    while view:
+        n = os.write(fd, view)
+        if n <= 0:
+            raise OSError("ledger write made no progress")
+        view = view[n:]
+
+
 def _read(path: str):
-    with open(path, encoding="ascii") as fh:
-        for raw in fh:
-            raw = raw.strip()
-            if raw:
-                yield json.loads(raw)
+    """Snapshot under a SHARED flock, so a concurrent append (exclusive) is never seen
+    half-written by verify_chain / entries()."""
+    with open(path, "rb") as fh:
+        if fcntl:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_SH)
+        try:
+            data = fh.read()
+        finally:
+            if fcntl:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    for raw in data.decode("ascii").splitlines():
+        raw = raw.strip()
+        if raw:
+            yield json.loads(raw)
 
 
 def _continues(e, seq: int, prev: str) -> tuple[bool, str]:
