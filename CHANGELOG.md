@@ -20,8 +20,21 @@ versioning is [SemVer](https://semver.org).
   on commit.
 - Production now also requires `AEGIS_SECRET_STORE` and `AEGIS_SECRET_KEY`. The store is
   probed at startup.
+- Hardened after the PR #42 review:
+  - only well-formed references are trusted;
+  - findings, compliance evidence and short or embedded values are scrubbed;
+  - structural fields are never rewritten;
+  - a rejected run deletes the values it stored;
+  - connector output is scrubbed;
+  - production denies clear-credential bundles;
+  - post-change compares key values (clear, Cisco type 7) and reports Junos `$9$` as
+    `partial`;
+  - startup refuses a rotated key;
+  - `AEGIS_SECRET_RETENTION_DAYS` prunes the file store;
+  - fsync'd writes, store directory ownership and permission enforcement, and a Vault
+    URL guard.
 - `change.secret_refs` is added to the schema (optional). New suite
-  `tests/secretref_test.py` (66 checks, mutation-checked) is in CI.
+  `tests/secretref_test.py` (99 checks, mutation-checked) is in CI.
 - **Correction:** the strategy doc said D3 would lift the D2 PCI 8.3.2 failures on Junos
   `$9$` keys. It does not. 8.3.2 judges how the device stores the key, so that row is
   unchanged.

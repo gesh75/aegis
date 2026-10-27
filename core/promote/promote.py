@@ -38,7 +38,8 @@ def promote(bundle: dict, *, connector: ProdConnector, approver: str | None = No
             approval_token: str | None = None, allow_live: bool = False,
             live_inventory_sha256: str | None = None, ledger=None,
             seal: dict | None = None, verifier=None, require_seal: bool = False,
-            require_verified_approval: bool = False, secret_store=None) -> dict:
+            require_verified_approval: bool = False, secret_store=None,
+            require_secret_refs: bool = False) -> dict:
     configs = (bundle.get("change") or {}).get("generated_configs") or []
     if not configs:
         raise PromoteDenied("nothing to promote")
@@ -60,6 +61,19 @@ def promote(bundle: dict, *, connector: ProdConnector, approver: str | None = No
     # store outage or a tampered value denies without burning the single-use approval.
     # Resolved text lives only in memory for the push; it is never recorded or ledgered.
     push_text: dict[int, str] = {}
+    resolved: dict[str, str] = {}     # value -> ref, to scrub anything the connector echoes
+    if require_secret_refs:
+        # production (D3): a bundle sealed before D3, or by a store-less AEGIS, still
+        # carries credentials in clear. Never push it; re-run the preflight instead.
+        raw = sorted({lbl for c in configs
+                      for lbl in secretref.raw_secret_labels(c.get("config", ""))})
+        if raw:
+            why = ("bundle carries credentials in clear (" + ", ".join(raw) + ") — re-run "
+                   "the preflight with the secret store (D3) before promoting")
+            if ledger is not None:
+                ledger.append("promotion_denied", run_id=run_id, source_sha256=src_sha,
+                              approver=approver, reason=why)
+            raise PromoteDenied(why)
     if any(secretref.has_refs(c.get("config", "")) for c in configs):
         why = None
         if secret_store is None:
@@ -67,7 +81,7 @@ def promote(bundle: dict, *, connector: ProdConnector, approver: str | None = No
         else:
             try:
                 push_text = {i: secretref.resolve_text(c["config"], run_id=str(run_id),
-                                                       store=secret_store)
+                                                       store=secret_store, collect=resolved)
                              for i, c in enumerate(configs)}
             except secretref.SecretStoreError as exc:
                 why = f"secret references could not be resolved: {exc}"
@@ -95,6 +109,9 @@ def promote(bundle: dict, *, connector: ProdConnector, approver: str | None = No
             r = connector.push(c["device"], c["vendor"], push_text.get(i, c["config"]))
         except Exception as e:  # noqa: BLE001 — a connector failure is a per-device result
             r = {"pushed": False, "detail": f"{type(e).__name__}: {e}"}
+        # a connector may echo commands (or put them in an exception); never let a
+        # resolved value reach the record, the API response or the ledger
+        r = secretref.scrub_values(r, resolved) if resolved else r
         all_ok = all_ok and bool(r.get("pushed"))
         pushed.append({"device": c["device"], "vendor": c["vendor"], **r})
 

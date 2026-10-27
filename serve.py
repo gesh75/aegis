@@ -145,6 +145,10 @@ def _load_secret_store():
     try:
         store = secretref.store_from_env()
         if store is not None:
+            store.check_key()            # a rotated key cannot read earlier entries
+            removed = store.prune(secretref.retention_days())
+            if removed:
+                print(f"[aegis.secrets] pruned {removed} reference(s) past retention")
             probe = store.ref_for("startup-probe", "aegis-canary")
             store.put(probe, "aegis-canary")
             if store.get(probe) != "aegis-canary":
@@ -592,6 +596,7 @@ def preflight_promote():
             seal=bundle.get("seal"), verifier=_VERIFIER, require_seal=True,
             require_verified_approval=runtime.is_production(),
             ledger=_LEDGER, secret_store=_SECRET_STORE,
+            require_secret_refs=runtime.is_production(),
         )
     except PromoteDenied as e:
         _inc("aegis_promotions_total", status="denied")
@@ -698,7 +703,7 @@ def postchange_verify():
     except IntentSpecError as e:
         return jsonify({"error": f"intents: {e}"}), 400
     try:
-        rec = verify_postchange(bundle, running, intents or None)
+        rec = verify_postchange(bundle, running, intents or None, secret_store=_SECRET_STORE)
     except Exception as e:  # noqa: BLE001
         return jsonify({"error": _client_error(e)}), 500
     _inc("aegis_postchange_total", status=rec["status"])

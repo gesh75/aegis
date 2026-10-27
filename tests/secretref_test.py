@@ -174,6 +174,67 @@ def property_bundles() -> None:
         secretref._scrub = orig  # noqa: SLF001
 
 
+def review_findings() -> None:
+    """Regression tests for the PR #42 review: prefix bypass, short/embedded values,
+    compliance + findings coverage, rollback records, enum safety, cleanup on failure."""
+    from ..evidence.bundler import verify
+    store = MemoryStore(KEY)
+    fake_ref = "AEGISREF-not-a-real-token"
+    out, refs, _ = tokenize_text(f'set protocols bgp group G authentication-key "{fake_ref}"',
+                                 run_id="r", store=store)
+    check("F4.prefix_lookalike_tokenized", fake_ref not in out and refs, out)
+    check("F4.detector_flags_prefix_lookalike",
+          det.plaintext_hits(f'set protocols bgp group G authentication-key "{fake_ref}"'))
+    out, refs, _ = tokenize_text("tacacs-server key <redacted>", run_id="r", store=store)
+    check("F4.literal_redacted_is_a_value", "<redacted>" not in out and refs, out)
+
+    base = {"run_id": "f" * 32, "operator": "alice",
+            "change": {"intent": "rotate key hunter2xyz to hunter2xyz-new, ab stays",
+                       "generated_configs": [{"device": "r1", "vendor": "ios", "grounded_commands": [],
+                                              "config": "tacacs-server key hunter2xyz\n"
+                                                        "snmp-server community ab RO\n"
+                                                        "username u password 0 pass"}],
+                       "risk_tier": "low"},
+            "validation": {"batfish": {"findings": ["r1: line 'tacacs-server key hunter2xyz' parsed",
+                                                    "r1: radius-server key onlyinfindings1 seen"]},
+                           "compliance": [{"framework": "pci_dss_v4", "control": "8.3.2",
+                                           "status": "pass", "evidence": "key hunter2xyz ok"}]},
+            "rollback": {"plan": ["r1: no tacacs-server key hunter2xyz",
+                                  "r1: restore tacacs-server key oldkeyonlyinrollback"]},
+            "verdict": {"decision": "ship_ready", "reason": "ok"},
+            "integrity": {"sha256": ""}}
+    b = protect_bundle(base, store)
+    blob = json.dumps(b)
+    for v in ("hunter2xyz", "onlyinfindings1", "oldkeyonlyinrollback"):
+        check(f"F1.no_{v}", v not in blob, blob[:400])
+    check("F1.embedded_value_scrubbed", "hunter2xyz-new" not in b["change"]["intent"],
+          b["change"]["intent"])
+    check("F1.short_value_whole_token_scrubbed", " ab " not in b["change"]["intent"],
+          b["change"]["intent"])
+    check("F5.compliance_evidence_scrubbed",
+          "hunter2xyz" not in b["validation"]["compliance"][0]["evidence"])
+    check("F1.enum_fields_untouched", b["validation"]["compliance"][0]["status"] == "pass"
+          and b["verdict"]["decision"] == "ship_ready", json.dumps(b["validation"]["compliance"]))
+    check("F1.refs_not_corrupted", all(secretref.REF_RE.fullmatch(r["ref"])
+                                       for r in b["change"]["secret_refs"]))
+    check("F13.rollback_refs_recorded",
+          any(r["device"] == "rollback" for r in b["change"]["secret_refs"]),
+          json.dumps(b["change"]["secret_refs"]))
+    check("F1.rehashed", verify(b))
+    roundtrip = resolve_text(b["change"]["generated_configs"][0]["config"], run_id="f" * 32,
+                             store=store)
+    check("F1.config_resolves", roundtrip == base["change"]["generated_configs"][0]["config"])
+
+    clean = MemoryStore(KEY)
+    orig = secretref._scrub  # noqa: SLF001
+    secretref._scrub = lambda obj, rx, mapping: obj  # noqa: SLF001
+    try:
+        check("F14.leak_rejected", _raises(protect_bundle, base, clean) is not None)
+    finally:
+        secretref._scrub = orig  # noqa: SLF001
+    check("F14.failed_run_leaves_nothing", not clean._data, str(len(clean._data)))  # noqa: SLF001
+
+
 def filestore() -> None:
     root = os.path.join(_TMP, "fs")
     fs = FileStore(root, KEY)
@@ -192,12 +253,31 @@ def filestore() -> None:
     os.replace(path, os.path.join(root, other + ".bin"))
     check("S3.renamed_file_fails", _raises(fs.get, other) is not None)
     fs.put(ref, "s3cr3t-value")
-    with open(path, "r+b") as fh:
+    with open(path, "r+b") as fh:   # flip one ciphertext byte (never a no-op)
         fh.seek(20)
-        fh.write(b"\x00")
+        b = fh.read(1)
+        fh.seek(20)
+        fh.write(bytes([b[0] ^ 0xFF]))
     check("S3.tampered_fails", "authentication" in (_raises(fs.get, ref) or ""))
     check("S3.missing", "not in store" in (_raises(fs.get, fs.ref_for("r", "nope")) or ""))
     check("S3.path_traversal", _raises(fs.get, "../../etc/passwd") is not None)
+    loose = os.path.join(_TMP, "loose")
+    os.makedirs(loose, mode=0o755)
+    os.chmod(loose, 0o755)
+    FileStore(loose, KEY)
+    check("S3.existing_dir_tightened", stat.S_IMODE(os.stat(loose).st_mode) == 0o700,
+          oct(stat.S_IMODE(os.stat(loose).st_mode)))
+    fs.put(ref, "s3cr3t-value")
+    check("S3.key_check_ok", _raises(fs.check_key) is None)
+    check("S3.rotated_key_refused", "does not match" in (_raises(
+        FileStore(root, b"\x33" * 32).check_key) or ""))
+    old_ref = fs.ref_for("r", "ancient")
+    fs.put(old_ref, "ancient")
+    past = os.path.getmtime(os.path.join(root, old_ref + ".bin")) - 40 * 86400
+    os.utime(os.path.join(root, old_ref + ".bin"), (past, past))
+    check("S3.prune_removes_expired", fs.prune(30) >= 1
+          and _raises(fs.get, old_ref) is not None and fs.get(ref) == "s3cr3t-value")
+    check("S3.prune_zero_keeps", fs.prune(0) == 0)
 
 
 class FakeVault:
@@ -209,6 +289,9 @@ class FakeVault:
         if self.status != 200:
             return httpx.Response(self.status, json={"errors": ["boom"]})
         key = req.url.path.rsplit("/", 1)[-1]
+        if req.method == "DELETE":
+            self.data.pop(key, None)
+            return httpx.Response(204)
         if req.method == "POST":
             self.data[key] = json.loads(req.content)["data"]["value"]
             return httpx.Response(200, json={"data": {"version": 1}})
@@ -237,8 +320,21 @@ def vault() -> None:
     os.environ.pop("AEGIS_INTEGRATION_HOSTS", None)
     check("S4.undeclared_host", "not declared" in (_raises(
         VaultStore, "https://vault.corp/v1/secret/data/aegis", "t", KEY) or ""))
-    check("S4.no_token", _raises(VaultStore, "http://127.0.0.1:8200/v1/s/data/a", "", KEY)
-          is not None)
+    os.environ["AEGIS_INTEGRATION_HOSTS"] = "vault.corp"
+    check("S4.no_token", "AEGIS_VAULT_TOKEN" in (_raises(
+        VaultStore, "https://vault.corp:8200/v1/secret/data/aegis", "", KEY) or ""))
+    check("S4.query_refused", "query" in (_raises(
+        VaultStore, "https://vault.corp:8200/v1/secret/data/aegis?x=1", "t", KEY) or ""))
+    check("S4.not_kv2_data_path", "data path" in (_raises(
+        VaultStore, "https://vault.corp:8200/v1/secret/aegis", "t", KEY) or ""))
+    fake = FakeVault()
+    vd = VaultStore("https://vault.corp:8200/v1/secret/data/aegis", "t", KEY,
+                    transport=httpx.MockTransport(fake))
+    vd.delete(ref)
+    check("S4.delete_destroys_all_versions", fake.reqs[-1].method == "DELETE"
+          and fake.reqs[-1].url.path == f"/v1/secret/metadata/aegis/{ref}",
+          str(fake.reqs[-1].url))
+    os.environ.pop("AEGIS_INTEGRATION_HOSTS", None)
 
 
 def resolve() -> None:
@@ -310,6 +406,27 @@ def promotion() -> None:
               and "AEGISREF-" not in pushed)
         trail = json.dumps(rec) + json.dumps(ledger.entries())
         check("S6.record_and_ledger_clean", not any(v in trail for v in values))
+        legacy = run_preflight("", backend=sim, lab="single", source="config_import",
+                               imported_configs=cfgs, operator="alice")
+        try:
+            promote(legacy, connector=Capture(), require_secret_refs=True, approver="bob",
+                    approval_token=mint_token_for_bundle("bob", legacy, ttl_sec=600))
+            check("F2.production_refuses_clear_credentials", False, "promoted")
+        except PromoteDenied as e:
+            check("F2.production_refuses_clear_credentials", "in clear" in str(e), str(e))
+        check("F2.referenced_bundle_has_no_clear_credentials",
+              not any(secretref.raw_secret_labels(c["config"])
+                      for c in b["change"]["generated_configs"]))
+
+        class Echo(Capture):
+            def push(self, device, vendor, config):
+                raise RuntimeError(f"device rejected: {config}")
+        b2 = run_preflight("", backend=sim, lab="single", source="config_import",
+                           imported_configs=cfgs, operator="alice", secret_store=store)
+        rec2 = promote(b2, connector=Echo(), secret_store=store, approver="bob",
+                       approval_token=mint_token_for_bundle("bob", b2, ttl_sec=600))
+        check("F3.connector_echo_scrubbed", not any(v in json.dumps(rec2) for v in values)
+              and "AEGISREF-" in json.dumps(rec2["pushed"]), json.dumps(rec2["pushed"])[:300])
         try:
             promote(b, connector=Capture(), approver="bob", approval_token=tok, ledger=ledger,
                     secret_store=store)
@@ -329,11 +446,28 @@ def postchange() -> None:
         {"device": "mx1", "vendor": "junos", "config": tok}]}, "integrity": {"sha256": "x"}}
     running = ('set protocols bgp group G authentication-key "$9$Re-encrypted.By.Device"\n'
                "set vlans v10 vlan-id 10")
-    r = verify_postchange(bundle, [{"device": "mx1", "config": running}])
-    check("S7.reference_matches_by_position", r["status"] == "verified", json.dumps(r["devices"]))
+    r = verify_postchange(bundle, [{"device": "mx1", "config": running}], secret_store=store)
+    check("S7.junos_reencrypted_is_partial_not_verified", r["status"] == "partial"
+          and r["devices"][0]["secrets"]["unverifiable"], json.dumps(r["devices"]))
     wrong = running.replace("group G", "group H")
-    r = verify_postchange(bundle, [{"device": "mx1", "config": wrong}])
+    r = verify_postchange(bundle, [{"device": "mx1", "config": wrong}], secret_store=store)
     check("S7.wrong_structure_is_drift", r["status"] == "drift", json.dumps(r["devices"]))
+    ios = "tacacs-server key 0 cisco\nhostname r1"
+    itok, _, _ = tokenize_text(ios, run_id="r", store=store)
+    ib = {"run_id": "r", "change": {"generated_configs": [
+        {"device": "r1", "vendor": "ios", "config": itok}]}, "integrity": {"sha256": "x"}}
+    for name, run, want in (("type7_decoded_match", "tacacs-server key 7 0822455D0A16", "verified"),
+                            ("clear_match", "tacacs-server key 0 cisco", "verified"),
+                            ("wrong_key_is_drift", "tacacs-server key 0 stale-key", "drift"),
+                            ("type7_other_seed_match", "tacacs-server key 7 060506324F41",
+                             "verified"),
+                            ("type7_wrong_key_is_drift", "tacacs-server key 7 051C14002F4B450C00",
+                             "drift")):
+        r = verify_postchange(ib, [{"device": "r1", "config": run + "\nhostname r1"}],
+                              secret_store=store)
+        check(f"S7.{name}", r["status"] == want, f"{r['status']} {json.dumps(r['devices'])}")
+    r = verify_postchange(ib, [{"device": "r1", "config": "tacacs-server key 0 cisco\nhostname r1"}])
+    check("S7.no_store_is_partial", r["status"] == "partial", r["status"])
 
 
 def configuration() -> None:
@@ -396,6 +530,7 @@ def http() -> None:
 
 def main() -> int:
     tokenize()
+    review_findings()
     property_bundles()
     filestore()
     vault()

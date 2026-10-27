@@ -1,7 +1,7 @@
 # D3: secret references (as built)
 
-**Status:** Implemented 2026-10-27 (`core/secretref.py`, `tests/secretref_test.py`, 66
-checks). This is decision D3 in `docs/STRATEGY_2026-10.md`. It is required in
+**Status:** Implemented 2026-10-27 (`core/secretref.py`, `tests/secretref_test.py`, 99
+checks; hardened after the PR #42 review). This is decision D3 in `docs/STRATEGY_2026-10.md`. It is required in
 `AEGIS_MODE=production`. Community mode without `AEGIS_SECRET_STORE` keeps the earlier
 behavior, so treat those bundles as Confidential.
 
@@ -30,7 +30,10 @@ neighbor 10.0.0.1 password 7 AEGISREF-a1b2c3d4e5f60718293a4b5c
 | A reference reveals nothing about the value | The token is `HMAC-SHA256(ref_key, run_id ‖ 0x00 ‖ value)[:96 bits]`. A bare hash of a weak password could be guessed offline; a keyed one cannot. |
 | A reference is bound to its run | `run_id` is inside the HMAC. The same secret in two runs gets two tokens, and a token cannot be replayed into another bundle. |
 | The store cannot swap a value | Resolution re-derives the token from the stored value and refuses on a mismatch. |
-| Nothing slips through | After tokenizing configs and the rollback plan, every remaining occurrence of a value is scrubbed bundle-wide, including intent text and findings. If a value would still be present, the run is **rejected** (fail closed), never sealed. A 200-run property test checks this. |
+| Nothing slips through | The credential patterns run on every **config-like** field: configs, grounded commands, rollback plan, findings and examples. Every value found is then scrubbed from **every free-text field**, including intent, evidence (compliance rows too), reason and descriptions. Values of 4+ characters are replaced anywhere, even inside longer tokens such as `pw-backup`. Shorter values are replaced as whole tokens only. Text inside existing references is never touched. Structural fields (enums, ids, hashes) are never rewritten. If a value would survive, the run is **rejected**, and the values this run stored are deleted. A 200-run property test checks this. |
+| Only real references are trusted | Detectors, redaction and tokenization skip a value only if it is a **well-formed** `AEGISREF-<24 hex>` token. A credential that merely starts with the prefix, or is literally `<redacted>`, is still tokenized. |
+| Connector output is scrubbed | If a connector echoes the pushed config (in its result or an exception), resolved values are replaced by their references before the record, the API response or the ledger see them. |
+| Production never pushes clear credentials | `AEGIS_MODE=production` denies promotion of a bundle that still carries credentials in clear (sealed before D3, or by a store-less instance). Re-run the preflight. |
 | The approval is not burned by an outage | References are resolved after the gate passes and **before** the single-use token is claimed. A dead vault denies the push, and the same token works once the store is back. |
 | Values never touch disk in clear | The file store uses AES-256-GCM with AAD = the reference, so a file renamed to another reference fails. Files are written atomically with mode 0600, in a 0700 directory. |
 
@@ -42,7 +45,7 @@ neighbor 10.0.0.1 password 7 AEGISREF-a1b2c3d4e5f60718293a4b5c
 | `protect_bundle` (end of `run_preflight`) | Tokenizes, stores the values, scrubs, runs the leak check, re-hashes |
 | Seal, exports, ServiceNow, ledger | References only |
 | `promote` → connector | References resolved in memory for the push only; the record keeps references |
-| `postchange/verify` | A referenced line matches the running config **by position**. Devices re-encrypt keys on commit (Junos `$9$`, Cisco type 7), so the value itself can never be compared as text. |
+| `postchange/verify` | A referenced line must match the running config's structure, and the key value is then **judged**. Clear text is compared directly. Cisco type 7 is decoded and compared, since it is reversible. A Cisco type digit (`0`→`7` under `service password-encryption`) is tolerated. A Junos `$9$` or a hashed running value is **unverifiable** and makes the result `partial`, never `verified`. A different key is `drift`. |
 
 ## What it does NOT do
 
@@ -50,8 +53,11 @@ neighbor 10.0.0.1 password 7 AEGISREF-a1b2c3d4e5f60718293a4b5c
 |---|---|
 | PCI 8.3.2 on the device | D3 protects AEGIS artifacts. A Junos box still stores the key as `$9$`, so the PCI row keeps judging the device. That needs device-side change: TCP-AO, a key-chain policy, or a hardware key store. |
 | Batfish and the twin seeing placeholders | The earlier design proposed that. As built, validation runs on the real config inside the perimeter, so results are exact. Batfish snapshots are deleted after each run. |
+| A credential typed **only** into prose (intent text) and never into the configuration | Running the patterns over prose misfires ("password to ..." is not a credential), so prose only gets value scrubbing. A credential the configuration carries is scrubbed from the intent too. |
+| Junos `$9$` value comparison after a push | `$9$` is reversible, so a decoder is possible. It is not shipped yet, and such keys report `partial`. |
+| Multi-process deployments | The ledger's single-use claim and hash chain are per-process. Run one gunicorn worker with threads, as the Dockerfile does. A shared-ledger fix is tracked separately. |
 | A secret the detectors don't recognize | Tokenization uses the `evidence/secrets.py` pattern table: Cisco/FRR/EOS type 0/5/7/8/9, key-strings, OSPF/AAA keys, SNMP communities, Junos keys/secrets/PSKs/`$9$`/`$1$`/`$6$`. A vendor syntax outside that table is not tokenized. Extend the table and add a test case. |
-| Key rotation of `AEGIS_SECRET_KEY` | Rotating the key orphans existing references, because their tokens no longer re-derive. Promote or re-run open changes first. A dual-key rotation window is a follow-up. |
+| Key rotation of `AEGIS_SECRET_KEY` | Rotating the key orphans existing references, because their tokens no longer re-derive. At startup the file store decrypts its newest entry and **refuses to start** on a key mismatch. Promote or re-run open changes, then prune or move the old store. A dual-key rotation window is a follow-up. |
 
 ## Configuration
 
@@ -61,10 +67,15 @@ neighbor 10.0.0.1 password 7 AEGISREF-a1b2c3d4e5f60718293a4b5c
 | `AEGIS_SECRET_KEY` | 64 hex characters: `python -c "import secrets;print(secrets.token_hex(32))"`. Keep it in your KMS, separately from the store. |
 | `AEGIS_VAULT_TOKEN` | Vault token with `create`/`read` on the path (AppRole recommended). |
 | `AEGIS_INTEGRATION_HOSTS` | Must list the Vault host while air-gap is on. |
+| `AEGIS_SECRET_RETENTION_DAYS` | Default 30; `0` keeps entries forever. The file store prunes entries older than this at startup. Approvals expire in hours and audit needs only references, so an expired value is never needed again. For Vault, set `delete_version_after` on the mount, because AEGIS does not prune Vault. |
 
-At startup the server writes and reads back a canary entry. A bad specification, a wrong
-key length or an unreachable vault stops the start, rather than failing the first
-change. `GET /api/status` reports `secret_refs: file | vault | off`.
+At startup the server checks the key against existing entries, prunes past retention,
+and writes and reads back a canary entry. A bad specification, a wrong or rotated key,
+or an unreachable vault stops the start, rather than failing the first change. The file
+store directory must be owned by the service user. A looser existing directory is
+tightened to 0700 or refused. Writes are fsync'd (file and directory). The Vault base
+URL must be a KV v2 `/data/` path with no query or fragment. Delete is a metadata delete,
+which removes all versions. `GET /api/status` reports `secret_refs: file | vault | off`.
 
 Minimal Vault policy:
 
@@ -86,6 +97,17 @@ path "secret/data/aegis/*" { capabilities = ["create", "update", "read"] }
 | S8 | Configuration errors; production requires the store |
 | S9 | HTTP end to end: sealed referenced bundle, clean CAB, promote resolves, values only in the store |
 
-Mutation-checked: removing the HMAC check on resolve, or pushing unresolved text, fails
-the suite. Removing the bundle-wide scrub makes runs fail closed (the leak check), and
-S2 asserts that.
+Review regressions (F1–F14, from the PR #42 review) cover: prefix look-alikes, short and
+embedded values, findings, compliance and rollback coverage, enum safety, cleanup on
+failure, connector echo, the production clear-credential deny, type-7 and `partial`
+post-change results, the key-rotation refusal, retention and directory permissions.
+
+Mutation-checked. Each of these fails the suite:
+
+- removing the HMAC check on resolve;
+- pushing unresolved text;
+- trusting the prefix instead of the full token;
+- dropping the connector scrub;
+- skipping cleanup on failure.
+
+Removing the bundle-wide scrub makes runs fail closed, and S2 asserts that.

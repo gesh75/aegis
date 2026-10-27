@@ -79,11 +79,17 @@ _HASH_PATTERNS: list[re.Pattern] = [
 ]
 
 REDACTED = "<redacted>"
-_REF = "AEGISREF-"   # D3 reference token (core/secretref.py): not a secret, never flagged
+# D3 reference token (core/secretref.py). Only a WELL-FORMED token is exempt: a credential
+# that merely starts with the prefix is still a credential.
+_REF_RE = re.compile(r"AEGISREF-[0-9a-f]{24}")
+
+
+def _is_ref(value: str) -> bool:
+    return bool(_REF_RE.fullmatch(value))
 
 
 def _real_hit(rx: re.Pattern, text: str) -> bool:
-    return any(not m.group("s").startswith(_REF) for m in rx.finditer(text))
+    return any(not _is_ref(m.group("s")) for m in rx.finditer(text))
 
 
 def plaintext_hits(text: str) -> list[str]:
@@ -109,7 +115,7 @@ def reversible_hits(text: str) -> list[str]:
 
 def _sub_group(rx: re.Pattern, text: str) -> str:
     def repl(m: re.Match) -> str:
-        if m.group("s") == REDACTED or m.group("s").startswith(_REF):
+        if m.group("s") == REDACTED or _is_ref(m.group("s")):
             return m.group(0)   # already redacted, or a D3 reference (safe to show)
         a, b = m.span("s")
         base = m.start(0)
