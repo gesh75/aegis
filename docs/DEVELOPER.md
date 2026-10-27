@@ -20,7 +20,7 @@ Companion pages: [ARCHITECTURE.md](ARCHITECTURE.md) (maps) · [GO_LIVE.md](GO_LI
 | `AEGIS_MAX_AUTHORIZED_TIER` | `core/risk/authority.py` | `AUTO` \| `HITL` \| `HOTL`. Default `HOTL`. `BLOCK` and unknown values **raise**. |
 | `AEGIS_SEAL_KEY` | `serve.py` | 64 hex chars = pinned Ed25519 seed. Unset = ephemeral demo key. Invalid = `SystemExit`. Pinned key **requires** `AEGIS_API_KEY` (T1 #10). |
 | `AEGIS_API_KEY` | `serve.py` | When set, mutating routes require header `X-Aegis-Key`. Custom header also breaks trivial CSRF POSTs. |
-| `AEGIS_APPROVE_KEY` | `core/promote/tokens.py` | HMAC-SHA256 key for G2/G3 tokens. Hex (≥32 chars) or raw (≥16 bytes). Unset = asserted-unverified. Set-but-too-short = `SystemExit`. Set **requires** `AEGIS_API_KEY` (startup `SystemExit`; mint 503). |
+| `AEGIS_APPROVE_KEY` | `core/promote/tokens.py` | HMAC-SHA256 key for G2/G3 tokens. Hex (≥32 chars) or raw (≥16 bytes). Unset = every approval is denied (fail closed). Set-but-too-short = `SystemExit`. Set **requires** `AEGIS_API_KEY` (startup `SystemExit`; mint 503). |
 | `AEGIS_INTEGRATION_HOSTS` | `core/integrations/__init__.py` | Hosts declared in-perimeter for ServiceNow / NetBox while air-gap is on. Exact hostnames, comma-separated. |
 | `AEGIS_SNOW_*`, `AEGIS_NETBOX_*` | `core/integrations/` | See `docs/INTEGRATIONS.md`. |
 | `AEGIS_REVERSIBLE_SECRETS` | `evidence/secrets.py` | `fail` (default, D2) or `report`: whether type 7 / `$9$` fail PCI 8.3.2. Invalid = startup `SystemExit`. |
@@ -128,7 +128,11 @@ Token verification (`core/promote/tokens.py`):
   Both parts must be canonical unpadded URL-safe base64: padding, junk or whitespace
   characters, the standard `+` `/` alphabet and non-zero trailing bits are a deny, so one
   payload+MAC has exactly one wire string and one single-use id.
-- **Unset**: any non-empty pair is accepted and recorded as `asserted-unverified`.
+- **Unset**: every approval is a **deny**, in every mode, with a reason that says to set
+  `AEGIS_APPROVE_KEY`. There is no free-text or `asserted-unverified` tier and no flag that
+  brings one back. Without the key you can still run preflights and promote changes that
+  need no approval (authority AUTO, low risk); anything that needs a second person is
+  denied until `AEGIS_APPROVE_KEY` and `AEGIS_API_KEY` are set.
 - The raw token is never written. Promotion records store `approval.method` + `token_sha256`.
 
 The seal (`core/seal/seal.py`) additionally refuses to certify an unbounded change.
@@ -183,6 +187,7 @@ jq -n --slurpfile b bundle.json --slurpfile t token.json \
 | mint **422** | The bundle was edited after the run (sha256 mismatch). | Re-run the preflight. |
 | mint **503** | The HMAC key is unset, or the API key is unset. | Set both keys. |
 | promote **403** G0 | The seal is missing, foreign, or mismatched. | Use the bundle exactly as `/run` returned it. |
+| promote **403** "AEGIS_APPROVE_KEY … is not set" | The change needs approval and the server has no HMAC key, so no approval can be verified. | Set `AEGIS_APPROVE_KEY` and `AEGIS_API_KEY`, restart, mint a token. |
 | promote **403** "already used" | Single-use token replay. | Mint a new token. |
 | promote **403** inventory | The live `inventory_sha256` differs from the one the token was bound to. | Re-run against the current inventory. |
 

@@ -5,7 +5,7 @@ then emit a sealed PROMOTION RECORD (its own sha256) that references the source 
 hash — a tamper-evident audit trail linking "what was validated" to "what was pushed".
 
 The raw approval token is never written. The record stores method + token sha256 so an
-examiner can see whether G2/G3 ran HMAC or the asserted-unverified honesty tier.
+examiner can see which approval (if any) G2/G3 relied on; only ``hmac-sha256`` counts.
 
 With a ``ledger`` (evidence/ledger.py) every promotion and denial is appended to the
 hash-chained audit log, and an HMAC approval token is SINGLE-USE: it is claimed

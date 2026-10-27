@@ -6,7 +6,8 @@ setup. Production removes them:
   * refuses to start without AEGIS_API_KEY, AEGIS_APPROVE_KEY, AEGIS_SEAL_KEY,
     AEGIS_LEDGER_PATH and AEGIS_APPROVER_KEYS (no open API, no presence-only approvals,
     no ephemeral seals, no in-memory audit trail, no operator-minted approvals)
-  * ``asserted-unverified`` approvals are a deny at the gate
+  * the gate takes a verified-approval requirement as an explicit flag (an unverifiable
+    approval is a deny in every mode, but production also refuses to start without the key)
   * promotion and evidence export require a valid Ed25519 seal
   * a preflight run must carry a change reference (e.g. a ServiceNow CHG number)
   * approval is granted only at promotion (HMAC token), never asserted at run time

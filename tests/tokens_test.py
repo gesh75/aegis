@@ -52,11 +52,17 @@ def main() -> int:
     except TokenError as e:
         check("mint.unset.raises", "unset" in str(e).lower(), str(e))
 
-    # 2 — unset key: any non-empty pair is asserted-unverified
+    # 2 — unset key: no free-text pair is an approval (iPvAwZKJ: fail closed, say how to fix it)
     a = verify_approval("noc-lead", "tok-123", BUNDLE)
-    check("assert.ok", a.ok, a.reason)
-    check("assert.method", a.method == "asserted-unverified", a.method)
+    check("assert.denied", not a.ok, a.reason)
+    check("assert.method", a.method == "none", a.method)
+    check("assert.reason_names_key", "AEGIS_APPROVE_KEY" in a.reason and "HMAC" in a.reason,
+          a.reason)
     check("assert.hash", isinstance(a.token_sha256, str) and len(a.token_sha256) == 64, str(a.token_sha256))
+    # ... even a structurally perfect token from another process (key unknown here)
+    foreign = _with_key(lambda: mint_token("noc-lead", BUNDLE, ttl_sec=600))
+    f = verify_approval("noc-lead", foreign, BUNDLE)
+    check("assert.foreign_token_denied", not f.ok and f.method == "none", f.reason)
 
     # 3 — empty denies
     empty = verify_approval("", "", BUNDLE)
@@ -237,9 +243,9 @@ def main() -> int:
 
     _with_key(_hmac_suite)
 
-    # 4 — after popping the key we are back in asserted mode
+    # 4 — after popping the key we are back in deny-everything mode
     a2 = verify_approval("noc-lead", "tok-123", BUNDLE)
-    check("assert.restored", a2.ok and a2.method == "asserted-unverified", a2.method)
+    check("assert.restored", not a2.ok and a2.method == "none", a2.method)
 
     if FAILS:
         print("\n=== APPROVAL TOKEN TEST: FAIL ===")

@@ -347,7 +347,7 @@ token in hand.
 
 - `core/promote/tokens.py` — `aegis1.<payload>.<mac>` HMAC-SHA256 tokens bound to
   bundle sha256 + approver + expiry. v2 (#24) also binds config hash + inventory
-  fingerprint. `AEGIS_APPROVE_KEY` unset = `asserted-unverified`.
+  fingerprint. `AEGIS_APPROVE_KEY` unset = every approval is denied.
 - `core/promote/gate.py` G2/G3 consume `verify_approval`. A random string is a deny
   once the key is set.
 - `core/promote/promote.py` writes `approval.method` + `token_sha256` (never the raw

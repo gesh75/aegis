@@ -17,6 +17,7 @@ from aegis.core.orchestrator.pipeline import run_preflight
 from aegis.core.promote import gate
 from aegis.core.promote.connectors import DryRunConnector
 from aegis.core.promote.promote import PromoteDenied, promote
+from aegis.core.promote.tokens import mint_token_for_bundle
 from aegis.core.risk import Tier, authorize, load_max_authorized
 from aegis.evidence.bundler import compute_sha256, verify
 
@@ -158,19 +159,30 @@ def test_no_promoted_bundle_exceeds_ceiling_property() -> None:
                "enable ospf area 0 on edge-{n}", "shut interface ethernet-1/{n}"]
     rng = random.Random(7)
     promoted = denied_block = 0
-    for i in range(300):
-        # alternate the D1 policy so both the BLOCK-tier and the HITL peering path are swept
-        with _peer_as_policy("block" if i % 2 else "hitl"):
-            b = _b(intents[rng.randrange(len(intents))].format(n=rng.randint(1, 9)))
-        try:
-            promote(b, connector=DryRunConnector(), approver="noc-lead",
-                    approval_token="t", allow_live=False)
-            promoted += 1
-            req = Tier[b["change"]["authority"]["required"].upper()]
-            assert authorize(req, ceiling).allowed, f"promoted above ceiling: {req.name}"
-        except PromoteDenied:
-            if b["change"]["authority"]["required"] == "block":
-                denied_block += 1
+    # approvals are HMAC-verified only (an unset key denies every approval), so sweep with
+    # a real key and a real v2 token minted for each bundle
+    old_key = os.environ.get("AEGIS_APPROVE_KEY")
+    os.environ["AEGIS_APPROVE_KEY"] = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+    try:
+        for i in range(300):
+            # alternate the D1 policy so both the BLOCK-tier and the HITL peering path are swept
+            with _peer_as_policy("block" if i % 2 else "hitl"):
+                b = _b(intents[rng.randrange(len(intents))].format(n=rng.randint(1, 9)),
+                       operator="ci")
+            try:
+                promote(b, connector=DryRunConnector(), approver="noc-lead",
+                        approval_token=mint_token_for_bundle("noc-lead", b), allow_live=False)
+                promoted += 1
+                req = Tier[b["change"]["authority"]["required"].upper()]
+                assert authorize(req, ceiling).allowed, f"promoted above ceiling: {req.name}"
+            except PromoteDenied:
+                if b["change"]["authority"]["required"] == "block":
+                    denied_block += 1
+    finally:
+        if old_key is None:
+            os.environ.pop("AEGIS_APPROVE_KEY", None)
+        else:
+            os.environ["AEGIS_APPROVE_KEY"] = old_key
     assert promoted > 0, "some benign changes must still promote"
     assert denied_block > 0, "some BLOCK-tier (AS) changes must be denied by the ceiling"
 

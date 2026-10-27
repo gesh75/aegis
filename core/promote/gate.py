@@ -14,11 +14,10 @@ Rules (all must hold to ALLOW):
   G5  ceiling:   re-derive required ≤ max_authorized at promote time. No self-escalation.
   SoD separation of duties: the approver may not be the change's operator (author).
 
-Approval tokens (T1 #9 / #24): when ``AEGIS_APPROVE_KEY`` is set, G2/G3 require an
-HMAC-SHA256 token bound to this bundle's sha256 + the approver identity + an expiry.
-v2 tokens also bind the grounded-config hash and the target inventory fingerprint.
-A random non-empty string is a deny. When the key is unset the pair is recorded as
-``asserted-unverified`` so the honesty tier is visible on the promotion record.
+Approval tokens (T1 #9 / #24): G2/G3 require an HMAC-SHA256 token (``AEGIS_APPROVE_KEY``)
+bound to this bundle's sha256 + the approver identity + an expiry. v2 tokens also bind
+the grounded-config hash and the target inventory fingerprint. A random non-empty string
+is a deny, and so is every approval while the key is unset (fail closed, in any mode).
 """
 from __future__ import annotations
 from dataclasses import dataclass

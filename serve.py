@@ -239,7 +239,7 @@ def status():
     return jsonify({
         "mode": runtime.mode(),
         "api_auth": "required" if _api_key() else "open",
-        "approve_hmac": "required" if hmac_configured() else "asserted-unverified",
+        "approve_hmac": "required" if hmac_configured() else "unset-approvals-denied",
         "approver_identity": "registry" if approvers.registry_configured() else "asserted",
         "seal": "pinned" if (os.environ.get("AEGIS_SEAL_KEY") or "").strip() else "ephemeral",
         "ledger": _LEDGER.head()["storage"],
@@ -265,7 +265,7 @@ def metrics():
         "# HELP aegis_info Static deployment facts (value is always 1).",
         "# TYPE aegis_info gauge",
         f'aegis_info{{mode="{runtime.mode()}",api_auth="{"required" if _api_key() else "open"}",'
-        f'approve_hmac="{"required" if hmac_configured() else "asserted"}",'
+        f'approve_hmac="{"required" if hmac_configured() else "unset"}",'
         f'ledger="{_LEDGER.head()["storage"]}"}} 1',
         "# HELP aegis_ledger_entries Entries in the hash-chained audit ledger.",
         "# TYPE aegis_ledger_entries gauge",
@@ -462,7 +462,7 @@ def approve_mint():
         return denied
     if not hmac_configured():
         return jsonify({"error": "AEGIS_APPROVE_KEY is unset — HMAC minting refused "
-                                 "(asserted-unverified mode)"}), 503
+                                 "(no approval can be verified until it is set)"}), 503
     if not _api_key():  # env changed after startup — still never mint unauthenticated
         return jsonify({"error": "AEGIS_APPROVE_KEY is set but AEGIS_API_KEY is unset — "
                                  "refusing to mint HMAC approvals on an unauthenticated "

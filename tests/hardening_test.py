@@ -125,6 +125,18 @@ def gate_and_ledger() -> None:
                           allow_live=False, seal=seal, verifier=verifier, require_seal=True,
                           require_verified_approval=True)
         check("H6.asserted_denied_in_prod", not d.allowed and "HMAC" in d.reason, d.reason)
+        # iPvAwZKJ: the community default (require_verified_approval=False) must not accept
+        # a free-text approver + token either; the reason says how to fix it
+        d = gate.evaluate(b, approver="bob", approval_token="anything", connector_is_live=False,
+                          allow_live=False, seal=seal, verifier=verifier, require_seal=True)
+        check("H6.asserted_denied_in_community", not d.allowed and d.approval_method == "none"
+              and "AEGIS_APPROVE_KEY" in d.reason, f"{d.allowed} {d.approval_method} {d.reason}")
+        try:
+            promote(b, connector=DryRunConnector(), approver="bob", approval_token="anything",
+                    ledger=Ledger(), seal=seal, verifier=verifier, require_seal=True)
+            check("H6.promote_asserted_denied", False, "promoted on an asserted approval")
+        except PromoteDenied as e:
+            check("H6.promote_asserted_denied", "AEGIS_APPROVE_KEY" in str(e), str(e))
         os.environ["AEGIS_APPROVE_KEY"] = KEY
 
         # H4 — single use, across restart
@@ -291,6 +303,14 @@ def http_contract() -> None:
     r = c.post("/api/preflight/promote", json={"bundle": forged, "connector": "dry_run"})
     check("H1.http_forgery_403", r.status_code == 403
           and "unsealed" in r.get_data(as_text=True), r.get_data(as_text=True)[:200])
+
+    # H6 — community mode, AEGIS_APPROVE_KEY unset: an asserted approval is a 403 over HTTP
+    if bundle.get("seal"):
+        r = c.post("/api/preflight/promote", json={"bundle": bundle, "approver": "bob",
+                                                   "approval_token": "x", "connector": "dry_run"})
+        check("H6.http_community_asserted_403", r.status_code == 403
+              and "AEGIS_APPROVE_KEY" in r.get_data(as_text=True),
+              f"{r.status_code} {r.get_data(as_text=True)[:200]}")
 
     # H6 — production request-time rules
     os.environ["AEGIS_MODE"] = "production"

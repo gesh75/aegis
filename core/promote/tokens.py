@@ -27,10 +27,10 @@ at verify/promote time, even when the sealed bundle hash is unchanged.
 
 MAC is HMAC-SHA256 over the exact payload bytes using ``AEGIS_APPROVE_KEY``.
 
-When the key is **unset**, ``verify_approval`` accepts any non-empty
-approver+token pair and reports method ``asserted-unverified`` — the honesty
-tier, not a backdoor. When the key **is** set, a token that does not verify
-is a hard deny. Empty/missing always denies.
+When the key is **unset**, ``verify_approval`` DENIES every approval (fail closed):
+nothing can be verified, so no free-text approver+token pair counts, in any mode. The
+reason tells the operator to set ``AEGIS_APPROVE_KEY``. When the key **is** set, a token
+that does not verify is a hard deny. Empty/missing always denies.
 
 The raw token is never stored. Callers persist ``token_sha256`` only.
 """
@@ -61,7 +61,7 @@ class TokenError(ValueError):
 @dataclass(frozen=True)
 class Approval:
     ok: bool
-    method: str  # hmac-sha256 | asserted-unverified | none
+    method: str  # hmac-sha256 | none
     reason: str
     token_sha256: str | None = None
 
@@ -288,9 +288,12 @@ def verify_approval(approver: str | None, token: str | None, bundle_sha256: str,
     hashed = _token_hash(tok)
     key = load_approve_key()
     if key is None:
-        # Honesty tier: presence-only. Recorded as asserted, unverified.
-        return Approval(True, "asserted-unverified",
-                        "approval asserted, HMAC not configured", hashed)
+        # Fail closed (iPvAwZKJ): with no key nothing can be verified, so a presence-only
+        # "approval" must never count. Say what to do about it.
+        return Approval(False, "none",
+                        "approval cannot be verified: AEGIS_APPROVE_KEY (HMAC) is not set — "
+                        "set AEGIS_APPROVE_KEY (and AEGIS_API_KEY), then mint a token via "
+                        "/api/approve/mint", hashed)
     issued = int(now if now is not None else time.time())
     payload, err = _parse_hmac(tok, key, now=issued)
     if err:
