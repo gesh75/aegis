@@ -20,6 +20,20 @@
       "properties": {
         "intent": { "type": "string" },
         "source": { "enum": ["nl_intent", "config_import"] },
+        "secret_refs": {
+          "type": "array",
+          "description": "D3: credentials replaced by keyed reference tokens; values live in the secret store and are resolved only at push.",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["ref", "device", "kind", "label"],
+            "properties": {
+              "ref":    { "type": "string", "pattern": "^AEGISREF-[0-9a-f]{24}$" },
+              "device": { "type": "string" },
+              "kind":   { "enum": ["plaintext", "reversible", "hash"] },
+              "label":  { "type": "string" }
+            }
+          }
+        },
         "change_ref": {
           "type": ["string", "null"], "maxLength": 64,
           "description": "ITSM change reference (e.g. ServiceNow CHG0012345). v1.3+. Covered by the bundle sha256, so an approval token bound to the bundle is bound to the ticket too. Required in AEGIS_MODE=production."

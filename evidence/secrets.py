@@ -79,12 +79,23 @@ _HASH_PATTERNS: list[re.Pattern] = [
 ]
 
 REDACTED = "<redacted>"
+# D3 reference token (core/secretref.py). Only a WELL-FORMED token is exempt: a credential
+# that merely starts with the prefix is still a credential.
+_REF_RE = re.compile(r"AEGISREF-[0-9a-f]{24}")
+
+
+def _is_ref(value: str) -> bool:
+    return bool(_REF_RE.fullmatch(value))
+
+
+def _real_hit(rx: re.Pattern, text: str) -> bool:
+    return any(not _is_ref(m.group("s")) for m in rx.finditer(text))
 
 
 def plaintext_hits(text: str) -> list[str]:
     """Labels (sorted, unique) of cleartext credentials present. Values never returned."""
     t = text or ""
-    return sorted({label for label, rx in PLAINTEXT_PATTERNS if rx.search(t)})
+    return sorted({label for label, rx in PLAINTEXT_PATTERNS if _real_hit(rx, t)})
 
 
 def reversible_policy() -> str:
@@ -99,13 +110,13 @@ def reversible_policy() -> str:
 
 def reversible_hits(text: str) -> list[str]:
     t = text or ""
-    return sorted({label for label, rx in REVERSIBLE_PATTERNS if rx.search(t)})
+    return sorted({label for label, rx in REVERSIBLE_PATTERNS if _real_hit(rx, t)})
 
 
 def _sub_group(rx: re.Pattern, text: str) -> str:
     def repl(m: re.Match) -> str:
-        if m.group("s") == REDACTED:
-            return m.group(0)
+        if m.group("s") == REDACTED or _is_ref(m.group("s")):
+            return m.group(0)   # already redacted, or a D3 reference (safe to show)
         a, b = m.span("s")
         base = m.start(0)
         whole = m.group(0)

@@ -18,6 +18,7 @@ within 3 business days.
 | Approval used once | single-use token claim in the hash-chained ledger | — |
 | Audit trail is tamper-evident | `evidence/ledger.py` hash chain, `/api/ledger/verify`, off-box anchor via `AEGIS_LEDGER_SYSLOG` (RFC 5424 to your SIEM) | Tamper-proof on the AEGIS host — the SIEM/WORM copy is the anchor |
 | Rollback | a vendor-aware *plan* (`verification: plan-only`) | That the reversal was executed in the twin |
+| No credential value in artifacts | D3 `AEGISREF-` tokens (keyed HMAC, run-bound) in the bundle, seal, PDF/CAB/OSCAL, ServiceNow and ledger; values only in the secret store; a value that would survive tokenization rejects the run | That the *device* protects its keys (PCI 8.3.2 still judges `$9$` / type 7); that Batfish/the twin inside the perimeter never see real values |
 | Compliance rows | deterministic config checks + process mapping for THIS change | Certification of the organization |
 
 ## Production deployment checklist
@@ -35,7 +36,9 @@ and it enforces the stricter request-time rules listed below.
 | `AEGIS_CHANGE_REF_PATTERN` *(optional)* | pin your ITSM numbering | e.g. `^CHG[0-9]{7}$` |
 | `AEGIS_LEDGER_SYSLOG` *(recommended)* | send every ledger entry to the SIEM (`host:port[/tcp\|/udp]`) | e.g. `127.0.0.1:514/tcp` to a local rsyslog relay that forwards over TLS. The sink itself sends plain TCP/UDP, not RFC 5425 TLS. |
 | `AEGIS_PEER_AS_POLICY` *(optional)* | `hitl` (default since D1: a BGP neighbor add needs a second-person approval) or `block` (the original: no neighbor add is ever promotable). The device's own AS, RD and RT are always BLOCK. | decision D1 in the strategy doc |
-| `AEGIS_REVERSIBLE_SECRETS` *(optional)* | `fail` (default since D2: Cisco type 7 / Junos `$9$` fail PCI 8.3.2) or `report` | decision D2. Bundle JSON still carries secrets until D3 (`docs/DESIGN_D3_SECRET_REFERENCES.md`). Store bundles as Confidential. |
+| `AEGIS_REVERSIBLE_SECRETS` *(optional)* | `fail` (default since D2: Cisco type 7 / Junos `$9$` fail PCI 8.3.2) or `report` | decision D2 |
+| `AEGIS_SECRET_STORE` | D3: `file:/var/lib/aegis/secrets` (AES-256-GCM, on a persistent volume) or `vault:https://<vault>/v1/<mount>/data/<path>` (KV v2, token in `AEGIS_VAULT_TOKEN`, host in `AEGIS_INTEGRATION_HOSTS`) | `docs/DESIGN_D3_SECRET_REFERENCES.md` |
+| `AEGIS_SECRET_KEY` | D3 root key (64 hex): keyed reference ids + file-store encryption | `python -c "import secrets;print(secrets.token_hex(32))"` |
 
 Production request-time rules:
 
@@ -58,6 +61,6 @@ capabilities dropped, `no-new-privileges`.
 ## Supply chain
 
 - Every GitHub Action is pinned to a commit SHA, and the workflow token is `contents: read`.
-- CI runs 17 test suites plus a live Batfish job, Bandit SAST (high severity gates the build), pip-audit (any known CVE in a runtime dependency gates the build), and a container smoke test that also asserts the server runs as a non-root user.
+- CI runs 18 test suites plus a live Batfish job, Bandit SAST (high severity gates the build), pip-audit (any known CVE in a runtime dependency gates the build), and a container smoke test that also asserts the server runs as a non-root user.
 - Dependabot watches pip, GitHub Actions and the base image.
 - Runtime and dev dependencies are split (`requirements.txt` / `requirements-dev.txt`). No test tooling ships in the image.
