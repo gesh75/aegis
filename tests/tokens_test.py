@@ -171,6 +171,65 @@ def main() -> int:
         check("hmac.unknown_version", not bad_ver.ok
               and "version" in bad_ver.reason, bad_ver.reason)
 
+        # Ujf5v6Mr — one payload+MAC has exactly ONE accepted wire string. The replay id is
+        # sha256(wire string), so any alternative encoding that still verified would be a
+        # fresh single-use token. Padding, junk, whitespace, the standard alphabet and
+        # unused trailing bits are all denies; leading/trailing whitespace is stripped to
+        # the same string (same hash).
+        def _b64_alphabet() -> str:
+            return "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+
+        def _flip_unused_bits(part: str) -> str | None:
+            """Same decoded bytes, different last char (only when the length leaves unused bits)."""
+            unused = {2: 4, 3: 2}.get(len(part) % 4)
+            if unused is None:
+                return None
+            alpha = _b64_alphabet()
+            idx = alpha.index(part[-1])
+            alt = idx ^ 1 if unused >= 1 else idx
+            return part[:-1] + alpha[alt]
+
+        canon = mint_token("noc-lead", BUNDLE, ttl_sec=600)
+        c_hash = verify_approval("noc-lead", canon, BUNDLE).token_sha256
+        for _ in range(200):  # find a token with '-' or '_' so the std-alphabet variant differs
+            if "-" in canon or "_" in canon:
+                break
+            canon = mint_token("noc-lead", BUNDLE, ttl_sec=600)
+        pre, pay, mac_part = canon.split(".")
+        variants = {
+            "pad1": canon + "=",
+            "pad2": canon + "==",
+            "pad_payload": f"{pre}.{pay}=.{mac_part}",
+            "junk4": canon + "!!!!",
+            "junk_inner": f"{pre}.{pay}.{mac_part[:10]}!!!!{mac_part[10:]}",
+            "space_inner": f"{pre}.{pay}.{mac_part[:10]}    {mac_part[10:]}",
+            "newline_inner": f"{pre}.{pay[:8]}\n\n\n\n{pay[8:]}.{mac_part}",
+            "std_alphabet": f"{pre}.{pay.replace('-', '+').replace('_', '/')}."
+                            f"{mac_part.replace('-', '+').replace('_', '/')}",
+            "mac_trailing_bits": f"{pre}.{pay}.{_flip_unused_bits(mac_part)}",
+            "payload_trailing_bits": f"{pre}.{_flip_unused_bits(pay)}.{mac_part}",
+        }
+        check("canon.verifies", verify_approval("noc-lead", canon, BUNDLE).ok)
+        check("canon.has_urlsafe_char", "-" in canon or "_" in canon,
+              "no '-'/'_' in 200 tokens (std-alphabet variant would equal canonical)")
+        for vname, vtok in variants.items():
+            if vtok == canon:
+                continue
+            res = verify_approval("noc-lead", vtok, BUNDLE)
+            check(f"malleable.{vname}.denied", not res.ok, f"re-encoding accepted: {res.reason}")
+        check("malleable.mac_bits_variant_built", _flip_unused_bits(mac_part) not in (None, mac_part))
+        for vname in ("leading_ws", "trailing_ws"):
+            ws = (" \t" + canon) if vname == "leading_ws" else (canon + "\n ")
+            res = verify_approval("noc-lead", ws, BUNDLE)
+            check(f"malleable.{vname}.same_hash", res.ok and res.token_sha256 == c_hash,
+                  f"{res.ok} {res.token_sha256} vs {c_hash}")
+        check("malleable.hash_is_wire_string",
+              c_hash == hashlib.sha256(canon.encode("utf-8")).hexdigest(), str(c_hash))
+        # v2 tokens take the same decoder
+        v2c = mint_token_for_bundle("noc-lead", sample, ttl_sec=600)
+        check("malleable.v2.pad_denied", not verify_approval(
+            "noc-lead", v2c + "=", digest, config_sha256=cfg, inventory_sha256=inv).ok)
+
         moved = dict(sample)
         moved["twin"] = dict(sample["twin"], inventory_rev="N+1")
         drift = inventory_digest(moved)

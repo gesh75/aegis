@@ -125,6 +125,9 @@ Token verification (`core/promote/tokens.py`):
 - `AEGIS_APPROVE_KEY` **set**: token must be `aegis1.<b64url payload>.<b64url hmac-sha256>`,
   payload `{"a": approver, "b": bundle_sha256, "exp": unix, "n": nonce, "v": 1}`, MAC over
   the exact payload bytes. Wrong approver, wrong hash, expiry, or a random string → deny.
+  Both parts must be canonical unpadded URL-safe base64: padding, junk or whitespace
+  characters, the standard `+` `/` alphabet and non-zero trailing bits are a deny, so one
+  payload+MAC has exactly one wire string and one single-use id.
 - **Unset**: any non-empty pair is accepted and recorded as `asserted-unverified`.
 - The raw token is never written. Promotion records store `approval.method` + `token_sha256`.
 

@@ -149,6 +149,25 @@ def gate_and_ledger() -> None:
             except PromoteDenied as e:
                 check("H4.replay_after_restart", "single-use" in str(e), str(e))
 
+            # H4 — a re-encoded copy of a spent token is the same token (Ujf5v6Mr): the
+            # replay id must not change with padding / junk / alphabet tricks
+            led3 = Ledger()
+            tok3 = mint_token_for_bundle("bob", b, ttl_sec=600)
+            rec3 = promote(b, connector=DryRunConnector(), approver="bob", approval_token=tok3,
+                           ledger=led3, seal=seal, verifier=verifier, require_seal=True)
+            check("H4.reencode.first_use_ok", rec3["status"] == "promoted", str(rec3.get("status")))
+            for vname, vtok in (("pad", tok3 + "="), ("junk", tok3 + "!!!!"),
+                                ("std_alphabet", tok3.replace("-", "+").replace("_", "/") + "==")):
+                try:
+                    promote(b, connector=DryRunConnector(), approver="bob", approval_token=vtok,
+                            ledger=led3, seal=seal, verifier=verifier, require_seal=True)
+                    check(f"H4.reencode.{vname}_denied", False, "re-encoded replay was promoted")
+                except PromoteDenied:
+                    check(f"H4.reencode.{vname}_denied", True)
+            check("H4.reencode.one_promotion",
+                  [e["kind"] for e in led3.entries()].count("promotion") == 1,
+                  str([e["kind"] for e in led3.entries()]))
+
             # H5 — chain verifies, then tamper
             ok, n, why = verify_chain(path)
             kinds = [e["kind"] for e in led2.entries()]

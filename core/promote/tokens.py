@@ -70,12 +70,26 @@ def _b64(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
 
+_B64URL = re.compile(r"[A-Za-z0-9_-]*")
+
+
 def _unb64(text: str) -> bytes:
-    pad = "=" * (-len(text) % 4)
-    return base64.urlsafe_b64decode(text + pad)
+    """Strict decode: accept ONLY the spelling ``_b64`` emits (URL-safe alphabet, no
+    padding, no whitespace or junk, no non-zero unused trailing bits). The replay id is
+    sha256 of the wire string, so a decoder that accepted other spellings of the same
+    bytes would hand out fresh "single-use" tokens (Ujf5v6Mr). ValueError = deny."""
+    if not _B64URL.fullmatch(text) or len(text) % 4 == 1:
+        raise ValueError("token part is not canonical unpadded URL-safe base64")
+    data = base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+    if _b64(data) != text:
+        raise ValueError("token part is not canonical unpadded URL-safe base64")
+    return data
 
 
 def _token_hash(token: str) -> str:
+    """Replay id of a token. Every token that verifies is canonical (see ``_unb64``), so
+    its wire string IS the canonical form of payload+MAC: one id per token, and the same
+    value older ledgers recorded."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
