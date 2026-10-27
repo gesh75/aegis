@@ -15,7 +15,7 @@ within 3 business days.
 | Bundle content is self-consistent | `integrity.sha256` (`evidence/bundler.py`) | Origin — anyone can recompute a sha256 |
 | Bundle came from **this** AEGIS and was bounded | detached Ed25519 seal, `verify_seal` G0–G6, offline `python -m aegis.verify` | Hardware-backed key (PIV signer is planned, `docs/PIV_HARDWARE_SIGNER_PLAN.md`) |
 | A second person approved | HMAC v2 token + `AEGIS_APPROVER_KEYS` identity + SoD (approver ≠ operator) | SSO/MFA identity (planned: Entra ID / OIDC) |
-| Approval used once | single-use token claim in the hash-chained ledger | — |
+| Approval used once | single-use token claim in the hash-chained ledger, atomic across threads **and processes** (every write re-syncs the shared file under `flock` before checking), so N workers on one `AEGIS_LEDGER_PATH` still allow exactly one claim | Filesystems without working `flock` (some NFS mounts): keep one worker there |
 | Audit trail is tamper-evident | `evidence/ledger.py` hash chain, `/api/ledger/verify`, off-box anchor via `AEGIS_LEDGER_SYSLOG` (RFC 5424 to your SIEM) | Tamper-proof on the AEGIS host — the SIEM/WORM copy is the anchor |
 | Rollback | a vendor-aware *plan* (`verification: plan-only`) | That the reversal was executed in the twin |
 | Compliance rows | deterministic config checks + process mapping for THIS change | Certification of the organization |
@@ -58,6 +58,6 @@ capabilities dropped, `no-new-privileges`.
 ## Supply chain
 
 - Every GitHub Action is pinned to a commit SHA, and the workflow token is `contents: read`.
-- CI runs 17 test suites plus a live Batfish job, Bandit SAST (high severity gates the build), pip-audit (any known CVE in a runtime dependency gates the build), and a container smoke test that also asserts the server runs as a non-root user.
+- CI runs 18 test suites plus a live Batfish job, Bandit SAST (high severity gates the build), pip-audit (any known CVE in a runtime dependency gates the build), and a container smoke test that also asserts the server runs as a non-root user.
 - Dependabot watches pip, GitHub Actions and the base image.
 - Runtime and dev dependencies are split (`requirements.txt` / `requirements-dev.txt`). No test tooling ships in the image.
