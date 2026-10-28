@@ -21,6 +21,14 @@
       backend by default even with ANTHROPIC_API_KEY; HttpBackend refuses a non-loopback
       model URL by default
   H14 guard-rejected preflights and denied mints are recorded in the ledger
+  H18 a v2 approval's inventory binding is re-checked at promotion against the LIVE source
+      of truth (server-side; the request cannot opt out) and denies on drift or outage
+  H17 separation of duties uses the AUTHENTICATED operator (recorded from the personal
+      credential, never from the request body) and denies when there is none
+  H16 authority HITL/HOTL always needs a verified second-person approval at the gate and is
+      recorded as needs_approval in the bundle, whatever the computed risk tier
+  H15 a run-time ``approver`` name is never a granted approval: the verdict stays
+      needs_approval, granted_by stays null, and the ledger records the claim as unverified
   H10 offline CLI (python -m aegis.verify): genuine seal PASS (exit 0), forged FAIL
       (exit 1), missing seal with --pubkey FAIL, tampered ledger FAIL
 
@@ -125,6 +133,18 @@ def gate_and_ledger() -> None:
                           allow_live=False, seal=seal, verifier=verifier, require_seal=True,
                           require_verified_approval=True)
         check("H6.asserted_denied_in_prod", not d.allowed and "HMAC" in d.reason, d.reason)
+        # iPvAwZKJ: the community default (require_verified_approval=False) must not accept
+        # a free-text approver + token either; the reason says how to fix it
+        d = gate.evaluate(b, approver="bob", approval_token="anything", connector_is_live=False,
+                          allow_live=False, seal=seal, verifier=verifier, require_seal=True)
+        check("H6.asserted_denied_in_community", not d.allowed and d.approval_method == "none"
+              and "AEGIS_APPROVE_KEY" in d.reason, f"{d.allowed} {d.approval_method} {d.reason}")
+        try:
+            promote(b, connector=DryRunConnector(), approver="bob", approval_token="anything",
+                    ledger=Ledger(), seal=seal, verifier=verifier, require_seal=True)
+            check("H6.promote_asserted_denied", False, "promoted on an asserted approval")
+        except PromoteDenied as e:
+            check("H6.promote_asserted_denied", "AEGIS_APPROVE_KEY" in str(e), str(e))
         os.environ["AEGIS_APPROVE_KEY"] = KEY
 
         # H4 — single use, across restart
@@ -148,6 +168,25 @@ def gate_and_ledger() -> None:
                 check("H4.replay_after_restart", False, "replay after restart was promoted")
             except PromoteDenied as e:
                 check("H4.replay_after_restart", "single-use" in str(e), str(e))
+
+            # H4 — a re-encoded copy of a spent token is the same token (Ujf5v6Mr): the
+            # replay id must not change with padding / junk / alphabet tricks
+            led3 = Ledger()
+            tok3 = mint_token_for_bundle("bob", b, ttl_sec=600)
+            rec3 = promote(b, connector=DryRunConnector(), approver="bob", approval_token=tok3,
+                           ledger=led3, seal=seal, verifier=verifier, require_seal=True)
+            check("H4.reencode.first_use_ok", rec3["status"] == "promoted", str(rec3.get("status")))
+            for vname, vtok in (("pad", tok3 + "="), ("junk", tok3 + "!!!!"),
+                                ("std_alphabet", tok3.replace("-", "+").replace("_", "/") + "==")):
+                try:
+                    promote(b, connector=DryRunConnector(), approver="bob", approval_token=vtok,
+                            ledger=led3, seal=seal, verifier=verifier, require_seal=True)
+                    check(f"H4.reencode.{vname}_denied", False, "re-encoded replay was promoted")
+                except PromoteDenied:
+                    check(f"H4.reencode.{vname}_denied", True)
+            check("H4.reencode.one_promotion",
+                  [e["kind"] for e in led3.entries()].count("promotion") == 1,
+                  str([e["kind"] for e in led3.entries()]))
 
             # H5 — chain verifies, then tamper
             ok, n, why = verify_chain(path)
@@ -273,6 +312,14 @@ def http_contract() -> None:
     check("H1.http_forgery_403", r.status_code == 403
           and "unsealed" in r.get_data(as_text=True), r.get_data(as_text=True)[:200])
 
+    # H6 — community mode, AEGIS_APPROVE_KEY unset: an asserted approval is a 403 over HTTP
+    if bundle.get("seal"):
+        r = c.post("/api/preflight/promote", json={"bundle": bundle, "approver": "bob",
+                                                   "approval_token": "x", "connector": "dry_run"})
+        check("H6.http_community_asserted_403", r.status_code == 403
+              and "AEGIS_APPROVE_KEY" in r.get_data(as_text=True),
+              f"{r.status_code} {r.get_data(as_text=True)[:200]}")
+
     # H6 — production request-time rules
     os.environ["AEGIS_MODE"] = "production"
     try:
@@ -291,24 +338,33 @@ def http_contract() -> None:
     key_bob = "bob-personal-credential-123456"
     os.environ["AEGIS_APPROVE_KEY"] = KEY
     os.environ["AEGIS_API_KEY"] = API  # HMAC minting is refused on an unauthenticated server
-    os.environ["AEGIS_APPROVER_KEYS"] = "bob:" + hashlib.sha256(key_bob.encode()).hexdigest()
+    os.environ["AEGIS_APPROVER_KEYS"] = (
+        "bob:" + hashlib.sha256(key_bob.encode()).hexdigest()
+        + ",alice:" + hashlib.sha256(b"alice-cred-0000000000").hexdigest())
     try:
-        r = c.post("/api/approve/mint", json={"approver": "bob", "bundle": bundle},
+        # the author is identified by her own credential (dgV9dC6J); the body names nobody
+        r = c.post("/api/preflight/run", json={"intent": "add vlan 10 to leaf-1", "lab": "single"},
+                   headers={"X-Aegis-Key": API, "X-Aegis-Approver-Key": "alice-cred-0000000000"})
+        authored = r.get_json() or {}
+        check("H7.author_identified", authored.get("operator") == "alice",
+              f"{r.status_code} {authored.get('operator')!r}")
+        r = c.post("/api/approve/mint", json={"approver": "bob", "bundle": authored},
                    headers={"X-Aegis-Key": API})
         check("H7.mint_needs_credential", r.status_code == 401, str(r.status_code))
-        r = c.post("/api/approve/mint", json={"approver": "carol", "bundle": bundle},
+        r = c.post("/api/approve/mint", json={"approver": "carol", "bundle": authored},
                    headers={"X-Aegis-Key": API, "X-Aegis-Approver-Key": key_bob})
         check("H7.body_identity_mismatch", r.status_code == 403, str(r.status_code))
-        r = c.post("/api/approve/mint", json={"bundle": bundle},
+        r = c.post("/api/approve/mint", json={"bundle": authored},
                    headers={"X-Aegis-Key": API, "X-Aegis-Approver-Key": key_bob})
         check("H7.identity_from_credential", r.status_code == 200
               and (r.get_json() or {}).get("approver") == "bob",
               f"{r.status_code} {r.get_data(as_text=True)[:160]}")
-        os.environ["AEGIS_APPROVER_KEYS"] += ",alice:" + hashlib.sha256(b"alice-cred-0000000000").hexdigest()
-        r = c.post("/api/approve/mint", json={"bundle": bundle},
+        r = c.post("/api/approve/mint", json={"bundle": authored},
                    headers={"X-Aegis-Key": API, "X-Aegis-Approver-Key": "alice-cred-0000000000"})
         check("H3.mint_sod_403", r.status_code == 403
-              and "separation of duties" in r.get_data(as_text=True), r.get_data(as_text=True)[:160])
+              and "separation of duties" in r.get_data(as_text=True)
+              and "authenticated operator" not in r.get_data(as_text=True),
+              r.get_data(as_text=True)[:160])
     finally:
         os.environ.pop("AEGIS_APPROVE_KEY", None)
         os.environ.pop("AEGIS_APPROVER_KEYS", None)
@@ -508,6 +564,324 @@ def rejections_ledgered() -> None:
         os.environ.pop("AEGIS_API_KEY", None)
 
 
+def runtime_approver_not_granted() -> None:
+    """mbDZXhDK: only an HMAC token (bound to the sealed bundle) is an approval. A name in
+    the run request body must neither flip the verdict nor be sealed as granted_by."""
+    from ..serve import app, _LEDGER
+    # library: a high-tier change with a claimed approver
+    b = run_preflight("add vlan 10 to leaf-1", backend=SimulatorBackend(), lab="single",
+                      operator="alice", approver="cto@corp")
+    ap = b["change"]["approval"]
+    check("H15.lib.high_tier", b["change"]["risk_tier"] == "high" and ap["required"] is True,
+          str(b["change"]["risk_tier"]))
+    check("H15.lib.verdict_needs_approval", b["verdict"]["decision"] == "needs_approval",
+          str(b["verdict"]))
+    check("H15.lib.granted_by_null", ap.get("granted_by") is None and ap.get("granted_utc") is None,
+          str(ap))
+    check("H15.lib.name_not_sealed", "cto@corp" not in json.dumps(b), "claimed approver in bundle")
+    # HTTP, community mode (the default)
+    c = app.test_client()
+    r = c.post("/api/preflight/run", json={"intent": "add vlan 10 to leaf-1", "lab": "single",
+                                           "operator": "alice", "approver": "cto@corp"})
+    hb = r.get_json() or {}
+    hap = (hb.get("change") or {}).get("approval") or {}
+    check("H15.http.verdict_needs_approval", r.status_code == 200
+          and (hb.get("verdict") or {}).get("decision") == "needs_approval",
+          f"{r.status_code} {(hb.get('verdict') or {})}")
+    check("H15.http.granted_by_null", hap.get("granted_by") is None, str(hap))
+    pdf = c.post("/api/preflight/evidence/pdf", json=hb)
+    check("H15.http.pdf_renders", pdf.status_code == 200, str(pdf.status_code))
+    rows = [e for e in _LEDGER.entries()
+            if e.get("kind") == "preflight_run" and e.get("run_id") == hb.get("run_id")]
+    check("H15.ledger.claim_recorded_unverified", len(rows) == 1
+          and rows[0].get("claimed_approver") == "cto@corp"
+          and rows[0].get("claimed_approver_verified") is False, str(rows))
+    # the approver claim never unlocks promotion either (no token -> no approval)
+    r = c.post("/api/preflight/promote", json={"bundle": hb, "approver": "cto@corp",
+                                               "connector": "dry_run"})
+    check("H15.http.promote_denied", r.status_code == 403, f"{r.status_code}")
+
+
+def authority_requires_approval() -> None:
+    """YzNoXPaU: a zero-impact peering change is risk_tier=low yet authority HITL. The sealed
+    record and the gate must both say a person has to approve it."""
+    nbr = [{"device": "leaf-1", "vendor": "frr", "config": " neighbor 10.0.0.9 remote-as 65020",
+            "grounded_commands": []}]
+    low = None
+    for lab in ("y", "z", "q", "w", "v", "u", "t", "s", "r", "p"):
+        b = run_preflight("", backend=SimulatorBackend(), lab=lab, source="config_import",
+                          imported_configs=nbr, operator="alice")
+        if b["change"]["risk_tier"] == "low" and b["change"]["authority"]["required"] == "hitl":
+            low = b
+            break
+    check("H16.found_low_risk_hitl_bundle", low is not None, "sim search found none")
+    if low is None:
+        return
+    check("H16.pipeline.needs_approval_recorded", low["change"]["approval"]["required"] is True,
+          str(low["change"]["approval"]))
+    check("H16.pipeline.verdict_needs_approval", low["verdict"]["decision"] == "needs_approval",
+          str(low["verdict"]))
+
+    def forced(required: str) -> dict:
+        """The same change as a (hypothetical) ship_ready/low bundle with the given authority,
+        re-sealed -- exercises the GATE rule on its own, independent of the pipeline."""
+        f = copy.deepcopy(low)
+        f["verdict"] = {"decision": "ship_ready", "reason": "forced"}
+        f["change"]["approval"] = {"required": False, "granted_by": None, "granted_utc": None}
+        f["change"]["authority"]["required"] = required
+        f["change"]["authority"]["effective"] = required
+        f["integrity"]["sha256"] = compute_sha256(f)
+        return f
+
+    kw = dict(connector_is_live=False, allow_live=False)
+    os.environ["AEGIS_APPROVE_KEY"] = KEY
+    try:
+        for req in ("hitl", "hotl"):
+            f = forced(req)
+            d = gate.evaluate(f, approver=None, approval_token=None, **kw)
+            check(f"H16.gate.{req}_without_approval_denied", not d.allowed
+                  and req.upper() in d.reason and "approval" in d.reason, f"{d.allowed} {d.reason}")
+            d = gate.evaluate(f, approver="bob", approval_token="junk", **kw)
+            check(f"H16.gate.{req}_random_token_denied", not d.allowed, d.reason)
+            tok = mint_token_for_bundle("bob", f, ttl_sec=600)
+            d = gate.evaluate(f, approver="bob", approval_token=tok, **kw)
+            check(f"H16.gate.{req}_verified_approval_allowed", d.allowed
+                  and d.approval_method == "hmac-sha256", f"{d.allowed} {d.reason}")
+            tok_a = mint_token_for_bundle("alice", f, ttl_sec=600)
+            d = gate.evaluate(f, approver="alice", approval_token=tok_a, **kw)
+            check(f"H16.gate.{req}_self_approval_denied", not d.allowed
+                  and "separation of duties" in d.reason, f"{d.allowed} {d.reason}")
+        # control: AUTO needs no approval; BLOCK stays a ceiling denial
+        d = gate.evaluate(forced("auto"), approver=None, approval_token=None, **kw)
+        check("H16.gate.auto_needs_no_approval", d.allowed, d.reason)
+        d = gate.evaluate(forced("block"), approver=None, approval_token=None, **kw)
+        check("H16.gate.block_still_ceiling_denied", not d.allowed
+              and "self-escalation" in d.reason.lower(), d.reason)
+    finally:
+        os.environ.pop("AEGIS_APPROVE_KEY", None)
+
+
+def operator_identity() -> None:
+    """dgV9dC6J: the bundle's operator comes from an authenticated principal, and an empty /
+    unknown operator can neither mint nor promote an approval."""
+    from ..serve import app, _LEDGER
+    c = app.test_client()
+    cred = {"alice": "alice-cred-000000000000", "bob": "bob-cred-00000000000000"}
+    os.environ["AEGIS_APPROVE_KEY"] = KEY
+    os.environ["AEGIS_API_KEY"] = API
+    os.environ["AEGIS_APPROVER_KEYS"] = ",".join(
+        f"{n}:{hashlib.sha256(k.encode()).hexdigest()}" for n, k in cred.items())
+    api = {"X-Aegis-Key": API}
+    body = {"intent": "add vlan 10 to leaf-1", "lab": "single"}
+    try:
+        # 1 — alice authenticates as herself and lies in the body: the body never wins
+        r = c.post("/api/preflight/run", json={**body, "operator": "bob"},
+                   headers={**api, "X-Aegis-Approver-Key": cred["alice"]})
+        ab = r.get_json() or {}
+        check("H17.operator_from_credential", r.status_code == 200 and ab.get("operator") == "alice",
+              f"{r.status_code} operator={ab.get('operator')!r}")
+        r = c.post("/api/approve/mint", json={"bundle": ab},
+                   headers={**api, "X-Aegis-Approver-Key": cred["alice"]})
+        check("H17.author_cannot_mint_for_own_run", r.status_code == 403
+              and "separation of duties" in r.get_data(as_text=True),
+              f"{r.status_code} {r.get_data(as_text=True)[:160]}")
+        r = c.post("/api/approve/mint", json={"bundle": ab},
+                   headers={**api, "X-Aegis-Approver-Key": cred["bob"]})
+        tok = (r.get_json() or {}).get("token")
+        check("H17.second_person_mints", r.status_code == 200 and tok, f"{r.status_code}")
+        r = c.post("/api/preflight/promote", json={"bundle": ab, "approver": "bob",
+                                                   "approval_token": tok, "connector": "dry_run"},
+                   headers=api)
+        check("H17.second_person_promotes", r.status_code == 200
+              and (r.get_json() or {}).get("approval", {}).get("method") == "hmac-sha256",
+              f"{r.status_code} {r.get_data(as_text=True)[:160]}")
+
+        # 2 — no personal credential on the run: the operator is NOT whatever the body says,
+        #     and nobody can approve a run whose author is unknown
+        for claimed in ("carol", "", None):
+            payload = {**body} if claimed is None else {**body, "operator": claimed}
+            r = c.post("/api/preflight/run", json=payload, headers=api)
+            ub = r.get_json() or {}
+            check(f"H17.unauthenticated_run[{claimed!r}]", r.status_code == 200
+                  and ub.get("operator") == "unauthenticated", f"operator={ub.get('operator')!r}")
+        before = _LEDGER.head()["seq"]
+        r = c.post("/api/approve/mint", json={"bundle": ub},
+                   headers={**api, "X-Aegis-Approver-Key": cred["bob"]})
+        check("H17.mint_denied_unauthenticated_operator", r.status_code == 403
+              and "authenticated operator" in r.get_data(as_text=True),
+              f"{r.status_code} {r.get_data(as_text=True)[:160]}")
+        check("H17.mint_denial_ledgered", "approval_mint_denied"
+              in [e["kind"] for e in _LEDGER.entries()[before:]])
+        # the claimed (unverified) operator is kept in the ledger, marked as a claim
+        rows = [e for e in _LEDGER.entries() if e.get("kind") == "preflight_run"
+                and e.get("claimed_operator") == "carol"]
+        check("H17.claimed_operator_ledgered", len(rows) >= 1 and rows[-1].get("operator")
+              == "unauthenticated", str(rows[-1:] if rows else "none"))
+        # a registered approver who omits their credential cannot launder their own run
+        r = c.post("/api/preflight/run", json={**body, "operator": "alice"}, headers=api)
+        lb = r.get_json() or {}
+        r = c.post("/api/approve/mint", json={"bundle": lb},
+                   headers={**api, "X-Aegis-Approver-Key": cred["alice"]})
+        check("H17.omitting_credential_does_not_launder", r.status_code == 403, str(r.status_code))
+    finally:
+        for k in ("AEGIS_APPROVE_KEY", "AEGIS_API_KEY", "AEGIS_APPROVER_KEYS"):
+            os.environ.pop(k, None)
+
+    # gate: an empty / unknown operator is a deny, not a skipped check
+    os.environ["AEGIS_APPROVE_KEY"] = KEY
+    try:
+        base = _needs_approval_bundle()
+        for label, op in (("empty", ""), ("blank", "   "), ("unknown", "unknown"),
+                          ("unauthenticated", "unauthenticated"), ("community", "community"),
+                          ("none", None)):
+            f = copy.deepcopy(base)
+            if op is None:
+                f.pop("operator", None)
+            else:
+                f["operator"] = op
+            f["integrity"]["sha256"] = compute_sha256(f)
+            tok = mint_token_for_bundle("bob", f, ttl_sec=600)
+            d = gate.evaluate(f, approver="bob", approval_token=tok, connector_is_live=False,
+                              allow_live=False)
+            check(f"H17.gate.operator_{label}_denied", not d.allowed
+                  and "authenticated operator" in d.reason, f"{d.allowed} {d.reason}")
+        ok = copy.deepcopy(base)
+        tok = mint_token_for_bundle("bob", ok, ttl_sec=600)
+        d = gate.evaluate(ok, approver="bob", approval_token=tok, connector_is_live=False,
+                          allow_live=False)
+        check("H17.gate.named_operator_second_person_allowed", d.allowed, d.reason)
+    finally:
+        os.environ.pop("AEGIS_APPROVE_KEY", None)
+
+
+def inventory_binding_at_promotion() -> None:
+    """W17qDJe8: approval was granted while NetBox showed inventory N; after NetBox moves to
+    N+1 the same token must not promote, and omitting inventory_sha256 must not skip that.
+    NetBox is an in-process httpx.MockTransport on a loopback URL: no socket is opened."""
+    import base64
+    import httpx
+    from .. import serve
+    from ..serve import app, _LEDGER
+    c = app.test_client()
+    state = {"stamp": "2026-10-01T00:00:00Z", "status": 200}
+
+    def fake_netbox(req):
+        if state["status"] != 200:
+            return httpx.Response(state["status"], text="down")
+        names = req.url.params.get_list("name")
+        return httpx.Response(200, json={"results": [
+            {"name": n, "role": {"slug": "leaf"}, "status": {"value": "active"},
+             "primary_ip": None, "last_updated": state["stamp"]} for n in names]})
+
+    orig = serve.netbox.NetBoxClient
+
+    class Patched(orig):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, transport=httpx.MockTransport(fake_netbox), **kw)
+
+    cred = {"alice": "alice-cred-000000000000", "bob": "bob-cred-00000000000000"}
+    reg = ",".join(f"{n}:{hashlib.sha256(k.encode()).hexdigest()}" for n, k in cred.items())
+    env = {"AEGIS_APPROVE_KEY": KEY, "AEGIS_API_KEY": API, "AEGIS_APPROVER_KEYS": reg,
+           "AEGIS_NETBOX_URL": "https://127.0.0.1:8443", "AEGIS_NETBOX_TOKEN": "nbtok"}
+    saved = {k: os.environ.get(k) for k in env}
+    os.environ.update(env)
+    serve.netbox.NetBoxClient = Patched
+    api = {"X-Aegis-Key": API}
+    try:
+        r = c.post("/api/preflight/run", json={"intent": "add vlan 10 to leaf-1", "lab": "single"},
+                   headers={**api, "X-Aegis-Approver-Key": cred["alice"]})
+        b = r.get_json() or {}
+        rev = (b.get("twin") or {}).get("inventory_rev", "")
+        check("H18.run_sealed_netbox_rev", r.status_code == 200 and rev.startswith("netbox:")
+              and b.get("seal"), f"{r.status_code} rev={rev!r}")
+
+        def mint() -> str:
+            m = c.post("/api/approve/mint", json={"bundle": b},
+                       headers={**api, "X-Aegis-Approver-Key": cred["bob"]})
+            return (m.get_json() or {}).get("token")
+
+        def promote_req(tok, **extra):
+            return c.post("/api/preflight/promote", headers=api, json={
+                "bundle": b, "approver": "bob", "approval_token": tok,
+                "connector": "dry_run", **extra})
+
+        tok_drift, tok_outage, tok_ok = mint(), mint(), mint()
+        check("H18.minted", all((tok_drift, tok_outage, tok_ok)))
+        claim_inv = json.loads(base64.urlsafe_b64decode(tok_drift.split(".")[1] + "==")).get("inv")
+
+        # NetBox moves to inventory N+1 AFTER approval, inside the token TTL
+        state["stamp"] = "2026-10-02T09:30:00Z"
+        r = promote_req(tok_drift)                       # no inventory_sha256 in the request
+        check("H18.drift_denied_without_request_field", r.status_code == 403
+              and "inventory" in r.get_data(as_text=True),
+              f"{r.status_code} {r.get_data(as_text=True)[:200]}")
+        r = promote_req(tok_drift, inventory_sha256=claim_inv)   # client echoes the OLD value
+        check("H18.client_cannot_override_live_value", r.status_code == 403
+              and "inventory" in r.get_data(as_text=True),
+              f"{r.status_code} {r.get_data(as_text=True)[:200]}")
+
+        # NetBox unreachable: the check cannot be computed -> deny, and the token is NOT burned
+        state["status"] = 503
+        before = [e["kind"] for e in _LEDGER.entries()].count("promotion")
+        r = promote_req(tok_outage)
+        check("H18.outage_denied", r.status_code == 503 and (r.get_json() or {}).get("denied") is True
+              and "source of truth" in r.get_data(as_text=True),
+              f"{r.status_code} {r.get_data(as_text=True)[:200]}")
+        check("H18.outage_promotes_nothing",
+              [e["kind"] for e in _LEDGER.entries()].count("promotion") == before)
+
+        # NetBox back at the inventory the approval saw: the same (unspent) token promotes
+        state["status"], state["stamp"] = 200, "2026-10-01T00:00:00Z"
+        r = promote_req(tok_ok)
+        rec = r.get_json() or {}
+        check("H18.unchanged_inventory_promotes", r.status_code == 200
+              and rec.get("approval", {}).get("method") == "hmac-sha256",
+              f"{r.status_code} {r.get_data(as_text=True)[:200]}")
+        check("H18.record_says_verified_against_netbox",
+              rec.get("approval", {}).get("inventory_verified") is True
+              and rec.get("approval", {}).get("inventory_source") == "netbox"
+              and rec.get("approval", {}).get("live_inventory_sha256") == claim_inv,
+              str(rec.get("approval")))
+        r = promote_req(tok_outage)                      # unspent: proves the outage deny kept it
+        check("H18.outage_did_not_burn_token", r.status_code == 200, f"{r.status_code}")
+        # a v1 (hash-only) token carries no inventory claim: even with NetBox on, the record
+        # must not call that approval inventory-verified
+        m = c.post("/api/approve/mint", json={"bundle_sha256": b["integrity"]["sha256"]},
+                   headers={**api, "X-Aegis-Approver-Key": cred["bob"]})
+        tok_v1 = (m.get_json() or {}).get("token")
+        r = promote_req(tok_v1)
+        ap = (r.get_json() or {}).get("approval", {})
+        check("H18.v1_token_not_presented_as_inventory_verified", r.status_code == 200
+              and (m.get_json() or {}).get("version") == 1 and ap.get("inventory_verified") is False,
+              f"{r.status_code} {ap}")
+    finally:
+        serve.netbox.NetBoxClient = orig
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    # no source of truth configured: nothing to re-check against, and the record says so
+    os.environ.update({"AEGIS_APPROVE_KEY": KEY, "AEGIS_API_KEY": API, "AEGIS_APPROVER_KEYS": reg})
+    try:
+        r = c.post("/api/preflight/run", json={"intent": "add vlan 10 to leaf-1", "lab": "single"},
+                   headers={**api, "X-Aegis-Approver-Key": cred["alice"]})
+        b = r.get_json() or {}
+        m = c.post("/api/approve/mint", json={"bundle": b},
+                   headers={**api, "X-Aegis-Approver-Key": cred["bob"]})
+        r = c.post("/api/preflight/promote", headers=api, json={
+            "bundle": b, "approver": "bob", "approval_token": (m.get_json() or {}).get("token"),
+            "connector": "dry_run"})
+        ap = (r.get_json() or {}).get("approval", {})
+        check("H18.no_source_not_presented_as_verified", r.status_code == 200
+              and ap.get("inventory_verified") is False and ap.get("inventory_source") == "none",
+              f"{r.status_code} {ap}")
+    finally:
+        for k in ("AEGIS_APPROVE_KEY", "AEGIS_API_KEY", "AEGIS_APPROVER_KEYS"):
+            os.environ.pop(k, None)
+
+
 def main() -> int:
     airgap_default()
     rejections_ledgered()
@@ -518,6 +892,10 @@ def main() -> int:
     production_startup()
     evidence_honesty()
     http_contract()
+    runtime_approver_not_granted()
+    authority_requires_approval()
+    operator_identity()
+    inventory_binding_at_promotion()
     if FAILS:
         print("\n=== HARDENING TEST: FAIL ===")
         for f in FAILS:

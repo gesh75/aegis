@@ -15,7 +15,8 @@ from datetime import datetime, timezone
 from ..backends.base import Backend, GeneratedConfig
 from . import guards, rollback
 from ...evidence.bundler import build_bundle, unattested_identity
-from ..risk import authority_record, classify_change, load_max_authorized, unify_severity
+from ..risk import (Tier, authority_record, classify_change, load_max_authorized,
+                    requires_approval, unify_severity)
 from ..intents.runner import run_intents
 from ...evidence.compliance import map_controls
 
@@ -28,7 +29,7 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
                   frameworks: list[str] | None = None,
                   operator: str = "unknown",
                   source: str = "nl_intent",
-                  approver: str | None = None,
+                  approver: str | None = None,  # an unverified claim: never an approval (step 8)
                   imported_configs: list[dict] | None = None,
                   model_identity: dict | None = None,
                   change_ref: str | None = None,
@@ -104,8 +105,25 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
             sessions_dropped=len(diff["sessions_dropped"]),
             converged=twin["converged"],
         )
-        needs_approval = guards.approval_required(tier)
-        approval_granted = bool(approver) and needs_approval
+        # authority tier (#5): orthogonal to risk_tier -- a twin-clean LOW-severity change
+        # to a fabric-identity construct (AS/RD/RT) is still BLOCK. Sealed + enforced at G5.
+        # Computed BEFORE the verdict (YzNoXPaU): a change whose required authority is HITL
+        # or HOTL needs a person's approval whatever its risk tier, so the sealed
+        # approval.required and the verdict must say so -- as the promotion gate will.
+        authority = authority_record(
+            unify_severity(batfish_errors=verify_errors,
+                           devices_affected=diff["devices_affected"],
+                           sessions_dropped=len(diff["sessions_dropped"]),
+                           converged=twin["converged"]),
+            classify_change(configs, roles=(inventory or {}).get("roles")),
+            load_max_authorized(),
+        )
+        needs_approval = (guards.approval_required(tier)
+                          or requires_approval(Tier[authority["required"].upper()]))
+        # Approval is granted ONLY at promotion, by an HMAC token bound to this sealed
+        # bundle (mbDZXhDK). A run-time ``approver`` is a claim nobody verified: it never
+        # flips the verdict and is never sealed as granted_by. (The caller may log it.)
+        approval_granted = False
 
         # 9. rollback plan ------------------------------------------------
         plan = rollback.build_rollback_plan(configs)
@@ -127,23 +145,11 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
             attested = backend.model_identity() if hasattr(backend, "model_identity") else None
             mi = attested if attested is not None else unattested_identity()
 
-        # authority tier (#5): orthogonal to risk_tier -- a twin-clean LOW-severity change
-        # to a fabric-identity construct (AS/RD/RT) is still BLOCK. Sealed + enforced at G5.
-        authority = authority_record(
-            unify_severity(batfish_errors=verify_errors,
-                           devices_affected=diff["devices_affected"],
-                           sessions_dropped=len(diff["sessions_dropped"]),
-                           converged=twin["converged"]),
-            classify_change(configs, roles=(inventory or {}).get("roles")),
-            load_max_authorized(),
-        )
-
         return build_bundle(
             run_id=run_id, created=created, operator=operator, intent=intent,
             source=source, configs=configs, batfish=bf, twin=twin, diff=diff,
             compliance=compliance, tier=tier, needs_approval=needs_approval,
-            approver=approver if approval_granted else None,
-            approval_utc=created if approval_granted else None,
+            approver=None, approval_utc=None,
             rollback_plan=plan, decision=decision, reason=reason,
             model_identity=mi, authority=authority, change_ref=change_ref,
             intents=intent_record, verify_errors=verify_errors,

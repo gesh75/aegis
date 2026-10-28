@@ -14,7 +14,7 @@ within 3 business days.
 | Nothing leaves the perimeter | `integrity.egress: "none"`, air-gap overlay (`network_mode: none`), **air-gap on by default** (no cloud backend, loopback-only model URLs unless `AEGIS_AIRGAP=0`) | That *your* host has no other egress path; or that an operator who sets `AEGIS_AIRGAP=0` stays inside the perimeter |
 | Bundle content is self-consistent | `integrity.sha256` (`evidence/bundler.py`) | Origin — anyone can recompute a sha256 |
 | Bundle came from **this** AEGIS and was bounded | detached Ed25519 seal, `verify_seal` G0–G6, offline `python -m aegis.verify` | Hardware-backed key (PIV signer is planned, `docs/PIV_HARDWARE_SIGNER_PLAN.md`) |
-| A second person approved | HMAC v2 token + `AEGIS_APPROVER_KEYS` identity + SoD (approver ≠ operator) | SSO/MFA identity (planned: Entra ID / OIDC) |
+| A second person approved | HMAC v2 token + `AEGIS_APPROVER_KEYS` identity + SoD (approver ≠ operator; the operator is the authenticated identity from the run's own credential, and a run with none cannot be approved) | SSO/MFA identity (planned: Entra ID / OIDC) |
 | Approval used once | single-use token claim in the hash-chained ledger | — |
 | Audit trail is tamper-evident | `evidence/ledger.py` hash chain, `/api/ledger/verify`, off-box anchor via `AEGIS_LEDGER_SYSLOG` (RFC 5424 to your SIEM) | Tamper-proof on the AEGIS host — the SIEM/WORM copy is the anchor |
 | Rollback | a vendor-aware *plan* (`verification: plan-only`) | That the reversal was executed in the twin |
@@ -40,8 +40,8 @@ and it enforces the stricter request-time rules listed below.
 Production request-time rules:
 
 - Every run needs a `change_ref`.
-- A run-time `approver` is rejected, because approval only happens at promotion.
-- `asserted-unverified` approvals are denied.
+- A run-time `approver` is rejected, because approval only happens at promotion. (Community mode ignores it: it is never sealed as `granted_by`, never changes the verdict, and the ledger keeps it as `claimed_approver` with `claimed_approver_verified: false`.)
+- Approvals are HMAC-only (this is now true in every mode: an unset `AEGIS_APPROVE_KEY` denies all approvals).
 - Only v2 (bundle-bound) tokens can be minted.
 - Exports and promotion require a valid seal. Blocked-verdict evidence is the one exception: it stays exportable and is labelled UNSEALED.
 - Internal errors are never returned to clients.

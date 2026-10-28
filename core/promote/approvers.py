@@ -12,6 +12,11 @@ Format (hashes only, so the environment never holds a usable credential)::
 
 Generate an entry:  python -m aegis.core.promote.approvers alice@corp
 
+The same credential identifies the AUTHOR of a run: ``/api/preflight/run`` records the
+operator from ``X-Aegis-Approver-Key`` (never from the request body), which is what lets
+separation of duties compare two identified people. A run without a credential is sealed
+as ``unauthenticated`` and cannot be approved.
+
 This is the bridge until SSO/OIDC (Entra ID) group-based roles land; the registry is the
 same seam an OIDC adapter would fill.
 """
@@ -26,6 +31,19 @@ import sys
 
 _NAME = re.compile(r"^[A-Za-z0-9._@/-]{1,128}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
+
+# What the server records as a bundle's operator when the run carried no personal
+# credential. The other names are the library default and the pre-fix community default;
+# none of them identifies a person, so none can stand in for "someone else approved it".
+UNAUTHENTICATED = "unauthenticated"
+_NO_IDENTITY = frozenset({"", "unknown", "unauthenticated", "community"})
+
+
+def identified(operator) -> bool:
+    """True only for an operator name that identifies a person. An empty, absent or
+    placeholder operator is NOT an identity: separation of duties cannot be checked
+    against it, so approval is denied (dgV9dC6J), never skipped."""
+    return str(operator or "").strip().lower() not in _NO_IDENTITY
 
 
 def load_registry() -> dict[str, str]:

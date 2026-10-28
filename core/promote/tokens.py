@@ -27,10 +27,10 @@ at verify/promote time, even when the sealed bundle hash is unchanged.
 
 MAC is HMAC-SHA256 over the exact payload bytes using ``AEGIS_APPROVE_KEY``.
 
-When the key is **unset**, ``verify_approval`` accepts any non-empty
-approver+token pair and reports method ``asserted-unverified`` — the honesty
-tier, not a backdoor. When the key **is** set, a token that does not verify
-is a hard deny. Empty/missing always denies.
+When the key is **unset**, ``verify_approval`` DENIES every approval (fail closed):
+nothing can be verified, so no free-text approver+token pair counts, in any mode. The
+reason tells the operator to set ``AEGIS_APPROVE_KEY``. When the key **is** set, a token
+that does not verify is a hard deny. Empty/missing always denies.
 
 The raw token is never stored. Callers persist ``token_sha256`` only.
 """
@@ -61,21 +61,36 @@ class TokenError(ValueError):
 @dataclass(frozen=True)
 class Approval:
     ok: bool
-    method: str  # hmac-sha256 | asserted-unverified | none
+    method: str  # hmac-sha256 | none
     reason: str
     token_sha256: str | None = None
+    inventory_bound: bool = False   # True only for a verified v2 token (carries an inv claim)
 
 
 def _b64(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
 
+_B64URL = re.compile(r"[A-Za-z0-9_-]*")
+
+
 def _unb64(text: str) -> bytes:
-    pad = "=" * (-len(text) % 4)
-    return base64.urlsafe_b64decode(text + pad)
+    """Strict decode: accept ONLY the spelling ``_b64`` emits (URL-safe alphabet, no
+    padding, no whitespace or junk, no non-zero unused trailing bits). The replay id is
+    sha256 of the wire string, so a decoder that accepted other spellings of the same
+    bytes would hand out fresh "single-use" tokens (Ujf5v6Mr). ValueError = deny."""
+    if not _B64URL.fullmatch(text) or len(text) % 4 == 1:
+        raise ValueError("token part is not canonical unpadded URL-safe base64")
+    data = base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+    if _b64(data) != text:
+        raise ValueError("token part is not canonical unpadded URL-safe base64")
+    return data
 
 
 def _token_hash(token: str) -> str:
+    """Replay id of a token. Every token that verifies is canonical (see ``_unb64``), so
+    its wire string IS the canonical form of payload+MAC: one id per token, and the same
+    value older ledgers recorded."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
@@ -101,12 +116,14 @@ def config_digest(bundle: dict) -> str:
     return _canonical_hash({"configs": rows})
 
 
-def inventory_digest(bundle: dict) -> str:
+def inventory_digest(bundle: dict, *, inventory_rev: str | None = None) -> str:
     """SHA-256 of the target inventory fingerprint.
 
     Derived from the twin record + the device list in generated configs.
     Optional ``twin.inventory_rev`` is included when present so a source-of-truth
-    revision becomes a first-class claim without a schema bump.
+    revision becomes a first-class claim without a schema bump. ``inventory_rev``
+    replaces the sealed revision with the source of truth's CURRENT one, which is how
+    promotion re-derives the fingerprint a v2 token was bound to (W17qDJe8).
     """
     twin = bundle.get("twin") if isinstance(bundle.get("twin"), dict) else {}
     configs = ((bundle.get("change") or {}).get("generated_configs") or [])
@@ -122,7 +139,8 @@ def inventory_digest(bundle: dict) -> str:
     payload = {
         "devices": devices,
         "engine": str(twin.get("engine") or ""),
-        "inventory_rev": str(twin.get("inventory_rev") or twin.get("rev") or ""),
+        "inventory_rev": str(inventory_rev if inventory_rev is not None
+                             else (twin.get("inventory_rev") or twin.get("rev") or "")),
         "node_count": node_count,
         "topology": str(twin.get("topology") or ""),
     }
@@ -274,9 +292,12 @@ def verify_approval(approver: str | None, token: str | None, bundle_sha256: str,
     hashed = _token_hash(tok)
     key = load_approve_key()
     if key is None:
-        # Honesty tier: presence-only. Recorded as asserted, unverified.
-        return Approval(True, "asserted-unverified",
-                        "approval asserted, HMAC not configured", hashed)
+        # Fail closed (iPvAwZKJ): with no key nothing can be verified, so a presence-only
+        # "approval" must never count. Say what to do about it.
+        return Approval(False, "none",
+                        "approval cannot be verified: AEGIS_APPROVE_KEY (HMAC) is not set — "
+                        "set AEGIS_APPROVE_KEY (and AEGIS_API_KEY), then mint a token via "
+                        "/api/approve/mint", hashed)
     issued = int(now if now is not None else time.time())
     payload, err = _parse_hmac(tok, key, now=issued)
     if err:
@@ -303,5 +324,5 @@ def verify_approval(approver: str | None, token: str | None, bundle_sha256: str,
             return Approval(False, "none",
                             "token is not bound to this inventory", hashed)
         return Approval(True, "hmac-sha256",
-                        "HMAC verified, bound to bundle, config, and inventory", hashed)
+                        "HMAC verified, bound to bundle, config, and inventory", hashed, True)
     return Approval(True, "hmac-sha256", "HMAC verified, bound to bundle hash", hashed)

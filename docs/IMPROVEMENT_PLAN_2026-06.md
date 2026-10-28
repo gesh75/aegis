@@ -23,7 +23,7 @@ Synthesized from 3 research briefs (Batfish, digital-twin verification, complian
    - `soc2.py:14` (CC8.1) — same
    - `nerc_cip.py:44` (CIP-010-R1.2) — same
    Mirror the correct pattern already in `hipaa.py` (164.308(a)(8)) and `cis_v8.py` (12.2). Note verified trigger: a *non-converged* twin still produces a sealed bundle containing PASS "validated in digital twin" — internally contradictory sealed evidence. *(HIGH, compliance)*
-9. **Real approval verification** — **SHIPPED 2026-08-29** (`core/promote/tokens.py`). HMAC-SHA256 tokens bound to bundle sha256 + approver + expiry. Unset `AEGIS_APPROVE_KEY` records `asserted-unverified`. Promotion record stores method + token hash, never the raw token.
+9. **Real approval verification** — **SHIPPED 2026-08-29** (`core/promote/tokens.py`). HMAC-SHA256 tokens bound to bundle sha256 + approver + expiry. Unset `AEGIS_APPROVE_KEY` denies every approval (it first recorded `asserted-unverified`; removed as fail-open). Promotion record stores method + token hash, never the raw token.
 10. **API auth + CSRF** — **SHIPPED 2026-08-29**. `X-Aegis-Key` on mutating routes when `AEGIS_API_KEY` is set; pinned `AEGIS_SEAL_KEY` without API auth is `SystemExit`.
 
 ### Tier 2 — Hardening (next sprint)

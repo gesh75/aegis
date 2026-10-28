@@ -103,6 +103,9 @@
            style="width:13em"/>
     <input id="apiKey" type="password" placeholder="API key (if required)" autocomplete="off"
            title="X-Aegis-Key — kept in this tab's sessionStorage only" style="width:11em"/>
+    <input id="personalKey" type="password" placeholder="your credential (identifies you)"
+           autocomplete="off" style="width:13em"
+           title="X-Aegis-Approver-Key — your personal credential. The run is recorded under your identity (the server never takes the operator from the form); without it nobody can approve the run. Kept in this tab's sessionStorage only"/>
     <select id="mode" title="sim = offline demo (zero deps) · live = operator/air-gapped path (needs API key + self-hosted LLM + containerlab)">
       <option value="sim">sim</option>
       <option value="live">live</option>

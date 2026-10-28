@@ -9,23 +9,27 @@ Rules (all must hold to ALLOW):
   G1  integrity: the bundle's sha256 must re-verify (no tampering between verify and push)
   G2  verdict:   `blocked` is never promotable; `ship_ready` is; `needs_approval` is only
                  promotable WITH a human approver + a verified approval token
-  G3  risk:      any medium/high-risk change requires approver + verified approval token
+  G3  risk:      any medium/high-risk change requires approver + verified approval token;
+                 so does any change whose sealed authority is HITL or HOTL, whatever its
+                 risk tier (a zero-impact peering change is still a human decision)
   G4  live:      using the live connector additionally requires explicit opt-in (allow_live)
   G5  ceiling:   re-derive required ≤ max_authorized at promote time. No self-escalation.
-  SoD separation of duties: the approver may not be the change's operator (author).
+  SoD separation of duties: the approver may not be the change's operator (author), and the
+                 bundle must carry an authenticated operator to compare against (an empty or
+                 placeholder operator is a deny, not a skipped check).
 
-Approval tokens (T1 #9 / #24): when ``AEGIS_APPROVE_KEY`` is set, G2/G3 require an
-HMAC-SHA256 token bound to this bundle's sha256 + the approver identity + an expiry.
-v2 tokens also bind the grounded-config hash and the target inventory fingerprint.
-A random non-empty string is a deny. When the key is unset the pair is recorded as
-``asserted-unverified`` so the honesty tier is visible on the promotion record.
+Approval tokens (T1 #9 / #24): G2/G3 require an HMAC-SHA256 token (``AEGIS_APPROVE_KEY``)
+bound to this bundle's sha256 + the approver identity + an expiry. v2 tokens also bind
+the grounded-config hash and the target inventory fingerprint. A random non-empty string
+is a deny, and so is every approval while the key is unset (fail closed, in any mode).
 """
 from __future__ import annotations
 from dataclasses import dataclass
 
 from ...evidence.bundler import verify
-from ..risk import Tier, authorize, load_max_authorized
+from ..risk import Tier, authorize, load_max_authorized, requires_approval
 from ..seal import verify_seal
+from .approvers import identified
 from .tokens import Approval, config_digest, inventory_digest, verify_approval
 
 
@@ -35,6 +39,7 @@ class GateDecision:
     reason: str
     approval_method: str = "none"
     token_sha256: str | None = None
+    inventory_bound: bool = False   # the approval used carries an inventory claim (v2 token)
 
 
 def evaluate(bundle: dict, *, approver: str | None, approval_token: str | None,
@@ -73,6 +78,17 @@ def evaluate(bundle: dict, *, approver: str | None, approval_token: str | None,
     def _deny(reason: str) -> GateDecision:
         return GateDecision(False, reason, approval.method, approval.token_sha256)
 
+    # The sealed authority tier is read here so HITL/HOTL can demand approval (G3) whatever
+    # the risk tier says; a missing or unparsable record is still denied at G5, below.
+    authority = bundle.get("change", {}).get("authority")
+    required = None
+    if isinstance(authority, dict):
+        try:
+            required = Tier[str(authority.get("required", "")).upper()]
+        except KeyError:
+            pass
+    needs_human = required is not None and requires_approval(required)
+
     if decision == "blocked":                                         # G2
         return _deny("verdict is blocked — not promotable")
     if decision == "needs_approval" and not has_approval:             # G2
@@ -84,9 +100,18 @@ def evaluate(bundle: dict, *, approver: str | None, approval_token: str | None,
         return _deny(f"{tier}-risk change requires approver + verified approval token "
                      f"({approval.reason})")
 
+    if needs_human and not has_approval:                              # G3
+        return _deny(f"{required.name} authority requires approver + verified approval "
+                     f"token, whatever the risk tier ({approval.reason})")
+
     operator = str(bundle.get("operator") or "").strip().lower()      # SoD
-    needs = decision == "needs_approval" or tier in ("medium", "high")
-    if needs and operator and operator == str(approver or "").strip().lower():
+    needs = decision == "needs_approval" or tier in ("medium", "high") or needs_human
+    if needs and not identified(operator):
+        # no authenticated author to compare the approver with: deny, never skip (dgV9dC6J)
+        return _deny("separation of duties cannot be established: the bundle has no "
+                     "authenticated operator identity — re-run the preflight as an "
+                     "identified person (personal credential)")
+    if needs and operator == str(approver or "").strip().lower():
         return _deny("separation of duties: the approver authored this change "
                      f"(operator {operator!r}) — a second person must approve")
 
@@ -114,4 +139,5 @@ def evaluate(bundle: dict, *, approver: str | None, approval_token: str | None,
 
     return GateDecision(True, f"{tier or 'unknown'}-risk {decision} approved for promotion",
                         approval.method if has_approval else "none",
-                        approval.token_sha256 if has_approval else None)
+                        approval.token_sha256 if has_approval else None,
+                        approval.inventory_bound if has_approval else False)

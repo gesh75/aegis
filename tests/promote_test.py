@@ -86,16 +86,22 @@ def run(n: int = 4000) -> dict:
 
     # P6: live connector must be refused unless allow_live, even for a clean ship_ready bundle
     clean = run_preflight("add vlan 10 to leaf-1", backend=SimulatorBackend(),
-                          lab="minimal", frameworks=["pci_dss_v4"])
-    # force a promotable verdict for the live test
+                          lab="minimal", frameworks=["pci_dss_v4"], operator="ci")
+    # force a promotable verdict for the live test. A free-text approval no longer gets past
+    # G2/G3 (no HMAC key = deny), so give it a real token: G4 must be the rule that refuses.
     live_refused = True
+    os.environ["AEGIS_APPROVE_KEY"] = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
     try:
         promote(clean, connector=DisabledLiveConnector(), approver="noc-lead",
-                approval_token="t", allow_live=False)
+                approval_token=mint_token_for_bundle("noc-lead", clean), allow_live=False)
         live_refused = False
         fails.append("live connector ran without opt-in")
-    except PromoteDenied:
-        pass
+    except PromoteDenied as e:
+        if "live connector" not in str(e):
+            live_refused = False
+            fails.append(f"live connector refused by the wrong rule: {e}")
+    finally:
+        os.environ.pop("AEGIS_APPROVE_KEY", None)
 
     # P8: HMAC key set → a random string is not an approval; a bound token is.
     hmac_random_promoted = False
@@ -143,6 +149,9 @@ def run(n: int = 4000) -> dict:
                     fails.append(f"v2 bound token method={(rec_v2.get('approval') or {}).get('method')!r}")
                 if rec_v2.get("approval", {}).get("live_inventory_sha256"):
                     fails.append("live inventory recorded when none was supplied")
+                if (rec_v2.get("approval", {}).get("inventory_verified") is not False
+                        or rec_v2["approval"].get("inventory_source") != "none"):
+                    fails.append("approval presented as inventory-verified with no live source")
             except PromoteDenied as e:
                 fails.append(f"v2 bound HMAC token denied: {e}")
             try:

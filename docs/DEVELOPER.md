@@ -20,7 +20,7 @@ Companion pages: [ARCHITECTURE.md](ARCHITECTURE.md) (maps) · [GO_LIVE.md](GO_LI
 | `AEGIS_MAX_AUTHORIZED_TIER` | `core/risk/authority.py` | `AUTO` \| `HITL` \| `HOTL`. Default `HOTL`. `BLOCK` and unknown values **raise**. |
 | `AEGIS_SEAL_KEY` | `serve.py` | 64 hex chars = pinned Ed25519 seed. Unset = ephemeral demo key. Invalid = `SystemExit`. Pinned key **requires** `AEGIS_API_KEY` (T1 #10). |
 | `AEGIS_API_KEY` | `serve.py` | When set, mutating routes require header `X-Aegis-Key`. Custom header also breaks trivial CSRF POSTs. |
-| `AEGIS_APPROVE_KEY` | `core/promote/tokens.py` | HMAC-SHA256 key for G2/G3 tokens. Hex (≥32 chars) or raw (≥16 bytes). Unset = asserted-unverified. Set-but-too-short = `SystemExit`. Set **requires** `AEGIS_API_KEY` (startup `SystemExit`; mint 503). |
+| `AEGIS_APPROVE_KEY` | `core/promote/tokens.py` | HMAC-SHA256 key for G2/G3 tokens. Hex (≥32 chars) or raw (≥16 bytes). Unset = every approval is denied (fail closed). Set-but-too-short = `SystemExit`. Set **requires** `AEGIS_API_KEY` (startup `SystemExit`; mint 503). |
 | `AEGIS_INTEGRATION_HOSTS` | `core/integrations/__init__.py` | Hosts declared in-perimeter for ServiceNow / NetBox while air-gap is on. Exact hostnames, comma-separated. |
 | `AEGIS_SNOW_*`, `AEGIS_NETBOX_*` | `core/integrations/` | See `docs/INTEGRATIONS.md`. |
 | `AEGIS_REVERSIBLE_SECRETS` | `evidence/secrets.py` | `fail` (default, D2) or `report`: whether type 7 / `$9$` fail PCI 8.3.2. Invalid = startup `SystemExit`. |
@@ -112,11 +112,19 @@ was previously under-counted; do not compare old vs new `bgp_sessions` numbers b
    mismatched seal → deny.
 1. G1 — `bundler.verify` (sha256, `seal` excluded from the hash)
 2. G2 — `blocked` never promotes; `needs_approval` needs approver + **verified** token
-3. G3 — medium/high risk needs approver + **verified** token
+3. G3 — medium/high risk needs approver + **verified** token, and so does any change whose
+   sealed `change.authority.required` is HITL or HOTL, **whatever the risk tier** (a
+   zero-impact `remote-as` change is `risk_tier: low` yet still needs a second person).
+   `run_preflight` computes the authority first and records such a change as
+   `approval.required: true` with verdict `needs_approval`, so the bundle and the gate agree.
 4. G4 — live connector needs `AEGIS_PROMOTE_ALLOW_LIVE=1`
 5. G5 — re-load ceiling and `authorize(required, ceiling)`. Missing / unknown
    `change.authority` → deny.
-6. SoD — when approval is required, approver ≠ `bundle.operator`.
+6. SoD — when approval is required, approver ≠ `bundle.operator`, and `bundle.operator` must
+   be an **authenticated** identity. The server records it from the caller's personal
+   credential (`X-Aegis-Approver-Key`), never from the request body; a run without one is
+   sealed as `unauthenticated`. An empty / `unknown` / `unauthenticated` / `community`
+   operator is a **deny** at mint and at the gate, not a skipped check.
 7. Single-use — with a `ledger`, an HMAC token is claimed before the first push. A replay
    → deny.
 
@@ -125,7 +133,14 @@ Token verification (`core/promote/tokens.py`):
 - `AEGIS_APPROVE_KEY` **set**: token must be `aegis1.<b64url payload>.<b64url hmac-sha256>`,
   payload `{"a": approver, "b": bundle_sha256, "exp": unix, "n": nonce, "v": 1}`, MAC over
   the exact payload bytes. Wrong approver, wrong hash, expiry, or a random string → deny.
-- **Unset**: any non-empty pair is accepted and recorded as `asserted-unverified`.
+  Both parts must be canonical unpadded URL-safe base64: padding, junk or whitespace
+  characters, the standard `+` `/` alphabet and non-zero trailing bits are a deny, so one
+  payload+MAC has exactly one wire string and one single-use id.
+- **Unset**: every approval is a **deny**, in every mode, with a reason that says to set
+  `AEGIS_APPROVE_KEY`. There is no free-text or `asserted-unverified` tier and no flag that
+  brings one back. Without the key you can still run preflights and promote changes that
+  need no approval (authority AUTO, low risk); anything that needs a second person is
+  denied until `AEGIS_APPROVE_KEY` and `AEGIS_API_KEY` are set.
 - The raw token is never written. Promotion records store `approval.method` + `token_sha256`.
 
 The seal (`core/seal/seal.py`) additionally refuses to certify an unbounded change.
@@ -143,7 +158,7 @@ The seal (`core/seal/seal.py`) additionally refuses to certify an unbounded chan
 | POST | `/api/preflight/evidence/oscal` | OSCAL-shaped AR JSON. Same integrity gate. Not FedRAMP. |
 | POST | `/api/preflight/evidence/cab` | CAB one-pager. Rollback is a plan, not a verified execution. |
 | POST | `/api/approve/mint` | HMAC token. Body `{bundle}` → **v2** (config + inventory). Hash-only → **v1**. Tampered bundle → **422**. **503** if HMAC unset. |
-| POST | `/api/preflight/promote` | Gate G0–G5 + SoD + single-use, then dry-run (default). Optional `inventory_sha256` live override. **403** on deny. |
+| POST | `/api/preflight/promote` | Gate G0–G5 + SoD + single-use, then dry-run (default). With `AEGIS_NETBOX_URL` set the server re-queries NetBox for the bundle's devices and checks the v2 token's inventory claim against that live value (the request's `inventory_sha256` is ignored); NetBox down → **503** `denied`. Without NetBox, `inventory_sha256` is an optional caller override and the record says `inventory_verified: false`. **403** on deny. |
 | POST | `/api/integrations/servicenow/sync` | Sealed bundle → verdict + redacted PDF attached to its CHG; blocked → on hold. Needs `AEGIS_API_KEY` + `AEGIS_SNOW_URL` (**503** otherwise). See `docs/INTEGRATIONS.md`. |
 | POST | `/api/postchange/verify` | `{bundle, running_configs, intents?}` → verified / drift / failed / unverifiable. Bundle must carry this server's seal (**422**). |
 | GET | `/api/seal/pubkey` | Offline verify material (public). |
@@ -161,8 +176,11 @@ credential.
 
 ```bash
 H=(-H "Content-Type: application/json" -H "X-Aegis-Key: $AEGIS_API_KEY")
-# 1. operator runs the preflight; the response IS the sealed bundle (seal under .seal)
-curl -s "${H[@]}" -d '{"intent":"add vlan 10 to leaf-1","operator":"alice","change_ref":"CHG0001234"}' \
+# 1. the author runs the preflight with THEIR OWN credential; the response IS the sealed
+#    bundle (seal under .seal). The server records the operator from that credential and
+#    ignores any "operator" in the body (kept in the ledger as claimed_operator).
+curl -s "${H[@]}" -H "X-Aegis-Approver-Key: $AUTHOR_CRED" \
+  -d '{"intent":"add vlan 10 to leaf-1","change_ref":"CHG0001234"}' \
   http://127.0.0.1:8088/api/preflight/run > bundle.json
 # 2. a DIFFERENT person mints a v2 token bound to that bundle's config + inventory
 jq '{bundle: .}' bundle.json | curl -s "${H[@]}" -H "X-Aegis-Approver-Key: $MY_APPROVER_CRED" \
@@ -177,11 +195,14 @@ jq -n --slurpfile b bundle.json --slurpfile t token.json \
 |---|---|---|
 | mint **401** | Missing or unknown `X-Aegis-Approver-Key`. The denial is ledgered. | The approver uses their own credential. |
 | mint **403** "separation of duties" | The approver is the bundle's `operator`. | A second person approves. |
+| mint **403** "no authenticated operator" | The run carried no personal credential, so its author is unknown and SoD cannot be checked. The same bundle is a deny at promotion. | The author re-runs the preflight with their `X-Aegis-Approver-Key` (the UI has a "your credential" field). |
 | mint **422** | The bundle was edited after the run (sha256 mismatch). | Re-run the preflight. |
 | mint **503** | The HMAC key is unset, or the API key is unset. | Set both keys. |
 | promote **403** G0 | The seal is missing, foreign, or mismatched. | Use the bundle exactly as `/run` returned it. |
+| promote **403** "AEGIS_APPROVE_KEY … is not set" | The change needs approval and the server has no HMAC key, so no approval can be verified. | Set `AEGIS_APPROVE_KEY` and `AEGIS_API_KEY`, restart, mint a token. |
 | promote **403** "already used" | Single-use token replay. | Mint a new token. |
-| promote **403** inventory | The live `inventory_sha256` differs from the one the token was bound to. | Re-run against the current inventory. |
+| promote **403** inventory | The live inventory (NetBox, re-read at promotion) differs from the one the token was bound to. | Re-run the preflight against the current inventory and re-approve. |
+| promote **503** "source of truth unavailable" | NetBox is configured but did not answer, so the inventory binding cannot be verified. Nothing is promoted and the token is not spent. | Restore NetBox and retry. |
 
 ---
 

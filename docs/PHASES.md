@@ -302,7 +302,7 @@ Turns AEGIS from "validate" into "validate → human-authorize → push, with an
   that refuses to run — a real SSH/NETCONF push is an explicit operator-wired extension.
 - `core/promote/gate.py` — deterministic approval policy (G1 integrity re-verify · G2
   blocked never promotes / needs_approval requires human approval · G3 medium/high-risk
-  requires approver + token · G4 live connector requires `AEGIS_PROMOTE_ALLOW_LIVE=1`).
+  or HITL/HOTL-authority requires approver + token · G4 live connector requires `AEGIS_PROMOTE_ALLOW_LIVE=1`).
 - `core/promote/promote.py` — runs the gate, pushes via the connector, emits a **sealed
   promotion record** (its own sha256, referencing the source bundle's hash → tamper-evident
   link from "what was validated" to "what was pushed").
@@ -347,7 +347,7 @@ token in hand.
 
 - `core/promote/tokens.py` — `aegis1.<payload>.<mac>` HMAC-SHA256 tokens bound to
   bundle sha256 + approver + expiry. v2 (#24) also binds config hash + inventory
-  fingerprint. `AEGIS_APPROVE_KEY` unset = `asserted-unverified`.
+  fingerprint. `AEGIS_APPROVE_KEY` unset = every approval is denied.
 - `core/promote/gate.py` G2/G3 consume `verify_approval`. A random string is a deny
   once the key is set.
 - `core/promote/promote.py` writes `approval.method` + `token_sha256` (never the raw

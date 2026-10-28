@@ -32,7 +32,7 @@ from aegis.core.promote.promote import promote, PromoteDenied
 from aegis.core.promote.connectors import get_connector
 from aegis.core.promote.tokens import (
     TokenError, hmac_configured, mint_token, mint_token_for_bundle,
-    digests_from_bundle, load_approve_key,
+    digests_from_bundle, inventory_digest, load_approve_key,
 )
 from aegis.core.promote import approvers
 from aegis.core import runtime
@@ -69,6 +69,13 @@ app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024  # 2 MB
 
 def _api_key() -> str:
     return (os.environ.get("AEGIS_API_KEY") or "").strip()
+
+
+def _request_identity() -> str | None:
+    """The person behind THIS request, from their own credential in X-Aegis-Approver-Key
+    (the same registry that identifies approvers). Never the request body and never the
+    shared API key, which identifies nobody. None = nobody authenticated (dgV9dC6J)."""
+    return approvers.resolve(request.headers.get("X-Aegis-Approver-Key"))
 
 
 def _guard_api():
@@ -239,8 +246,9 @@ def status():
     return jsonify({
         "mode": runtime.mode(),
         "api_auth": "required" if _api_key() else "open",
-        "approve_hmac": "required" if hmac_configured() else "asserted-unverified",
-        "approver_identity": "registry" if approvers.registry_configured() else "asserted",
+        "approve_hmac": "required" if hmac_configured() else "unset-approvals-denied",
+        "approver_identity": ("registry" if approvers.registry_configured()
+                              else "unconfigured-approvals-denied"),
         "seal": "pinned" if (os.environ.get("AEGIS_SEAL_KEY") or "").strip() else "ephemeral",
         "ledger": _LEDGER.head()["storage"],
         "intents_engine": ("batfish" if (os.environ.get("AEGIS_BATFISH_HOST") or "").strip()
@@ -265,7 +273,7 @@ def metrics():
         "# HELP aegis_info Static deployment facts (value is always 1).",
         "# TYPE aegis_info gauge",
         f'aegis_info{{mode="{runtime.mode()}",api_auth="{"required" if _api_key() else "open"}",'
-        f'approve_hmac="{"required" if hmac_configured() else "asserted"}",'
+        f'approve_hmac="{"required" if hmac_configured() else "unset"}",'
         f'ledger="{_LEDGER.head()["storage"]}"}} 1',
         "# HELP aegis_ledger_entries Entries in the hash-chained audit ledger.",
         "# TYPE aegis_ledger_entries gauge",
@@ -304,7 +312,8 @@ def _reject_run(body: dict, code: int):
     data = data if isinstance(data, dict) else {}
     _LEDGER.append("preflight_rejected", stage=body.get("stage", "guard"), http_status=code,
                    reason=str(body.get("error", ""))[:300],
-                   operator=str(data.get("operator") or "")[:128] or None,
+                   operator=_request_identity(),
+                   claimed_operator=str(data.get("operator") or "")[:128] or None,
                    change_ref=str(data.get("change_ref") or "")[:64] or None)
     return jsonify(body), code
 
@@ -357,7 +366,8 @@ def preflight_run():
             (data.get("intent") or "").strip(), backend=SimulatorBackend(),
             lab=(data.get("lab") or "clos-evpn").strip(),
             frameworks=data.get("frameworks") or ["pci_dss_v4"],
-            operator=(data.get("operator") or "community").strip(),
+            # authenticated identity only; the body's "operator" is a claim, ledgered below
+            operator=_request_identity() or approvers.UNAUTHENTICATED,
             approver=data.get("approver") or None,
             source=source, imported_configs=imported, change_ref=change_ref,
             intents=intents or None,
@@ -383,6 +393,12 @@ def preflight_run():
                    authority=bundle["change"]["authority"]["effective"],
                    operator=bundle.get("operator"), change_ref=change_ref,
                    sealed=isinstance(seal, dict),
+                   **({"claimed_operator": str(data.get("operator"))[:128]}
+                      if data.get("operator") else {}),
+                   # a run-time approver is never an approval (mbDZXhDK): keep what was
+                   # claimed, clearly marked unverified
+                   **({"claimed_approver": str(data.get("approver"))[:128],
+                       "claimed_approver_verified": False} if data.get("approver") else {}),
                    intents_failed=(bundle["validation"].get("intents") or {}).get("failed"),
                    intents_errors=(bundle["validation"].get("intents") or {}).get("errors"))
     return jsonify(bundle)
@@ -462,7 +478,7 @@ def approve_mint():
         return denied
     if not hmac_configured():
         return jsonify({"error": "AEGIS_APPROVE_KEY is unset — HMAC minting refused "
-                                 "(asserted-unverified mode)"}), 503
+                                 "(no approval can be verified until it is set)"}), 503
     if not _api_key():  # env changed after startup — still never mint unauthenticated
         return jsonify({"error": "AEGIS_APPROVE_KEY is set but AEGIS_API_KEY is unset — "
                                  "refusing to mint HMAC approvals on an unauthenticated "
@@ -490,7 +506,16 @@ def approve_mint():
                                  "bundle (binds config + inventory, enables SoD check)"}), 400
     if isinstance(bundle, dict):
         op = str(bundle.get("operator") or "").strip().lower()
-        if op and op == str(who).strip().lower():
+        if not approvers.identified(op):
+            _inc("aegis_approval_mint_total", result="operator_unauthenticated")
+            _LEDGER.append("approval_mint_denied", run_id=bundle.get("run_id"),
+                           approver=str(who).strip(),
+                           reason="bundle has no authenticated operator")
+            return jsonify({"error": "separation of duties cannot be checked: the bundle has "
+                                     "no authenticated operator identity — the author must "
+                                     "re-run the preflight with their personal credential "
+                                     "(X-Aegis-Approver-Key)"}), 403
+        if op == str(who).strip().lower():
             _inc("aegis_approval_mint_total", result="sod_denied")
             _LEDGER.append("approval_mint_denied", run_id=bundle.get("run_id"),
                            approver=str(who).strip(), reason="separation of duties")
@@ -559,13 +584,33 @@ def preflight_promote():
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     allow_live = (os.environ.get("AEGIS_PROMOTE_ALLOW_LIVE") or "").strip() == "1"
+    # W17qDJe8: with a source of truth configured the server derives the live inventory
+    # fingerprint ITSELF; the request cannot supply, override or omit it. If it cannot be
+    # derived the promotion is denied (fail closed). Only a sealed bundle is worth a lookup;
+    # anything else is denied by the gate below. Without NetBox a caller-supplied
+    # inventory_sha256 stays a stricter-only override and the record says "not verified".
+    live_inv = data.get("inventory_sha256")
+    inv_source = None
+    if netbox.configured() and data.get("approval_token") and _sealed_by_us(bundle):
+        try:
+            live_inv, inv_source = _live_inventory_sha256(bundle), "netbox"
+        except IntegrationError as exc:
+            _inc("aegis_integration_calls_total", system="netbox", result="error")
+            _inc("aegis_promotions_total", status="denied")
+            reason = (f"source of truth unavailable ({exc}) — the approval's inventory "
+                      "binding cannot be verified, promotion denied")
+            _LEDGER.append("promotion_denied", run_id=bundle.get("run_id"),
+                           source_sha256=(bundle.get("integrity") or {}).get("sha256"),
+                           approver=data.get("approver"), reason=reason[:300])
+            return jsonify({"error": reason, "denied": True}), 503
+        _inc("aegis_integration_calls_total", system="netbox", result="ok")
     try:
         rec = promote(
             bundle, connector=conn,
             approver=data.get("approver"),
             approval_token=data.get("approval_token"),
             allow_live=allow_live,
-            live_inventory_sha256=data.get("inventory_sha256"),
+            live_inventory_sha256=live_inv, inventory_source=inv_source,
             # A1: the server ALWAYS authenticates the bundle with its pinned seal key —
             # a self-hashed forgery fails G0 before any other rule runs.
             seal=bundle.get("seal"), verifier=_VERIFIER, require_seal=True,
@@ -580,6 +625,30 @@ def preflight_promote():
         return jsonify({"error": _client_error(e)}), 500
     _inc("aegis_promotions_total", status=rec["status"])
     return jsonify(rec)
+
+
+def _sealed_by_us(bundle: dict) -> bool:
+    """Integrity + this server's seal both verify (no exceptions: malformed = False)."""
+    seal = bundle.get("seal")
+    try:
+        return (isinstance(seal, dict) and bundler_verify(bundle)
+                and verify_seal(bundle, seal, _VERIFIER).valid)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _live_inventory_sha256(bundle: dict) -> str:
+    """The inventory fingerprint of the bundle's target devices as the source of truth
+    shows them NOW, in the same form a v2 approval token was bound to. Raises
+    IntegrationError when NetBox cannot answer."""
+    devices = [c["device"] for c in ((bundle.get("change") or {}).get("generated_configs") or [])
+               if isinstance(c, dict) and c.get("device")]
+    client = netbox.NetBoxClient()
+    try:
+        inv = client.inventory(devices)
+    finally:
+        client.close()
+    return inventory_digest(bundle, inventory_rev=str(inv.get("inventory_rev") or ""))
 
 
 def _netbox_lookup(devices: list[str]) -> dict:
