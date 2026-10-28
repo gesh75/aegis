@@ -12,7 +12,9 @@ import os
 import sys
 
 from aegis.core.backends.base import GeneratedConfig
+from aegis.core.backends.simulator import SimulatorBackend
 from aegis.core.orchestrator.guards import risk_tier
+from aegis.core.orchestrator.pipeline import run_preflight
 from aegis.core.risk import (
     ChangeClass,
     Severity,
@@ -22,6 +24,7 @@ from aegis.core.risk import (
     required_authority,
     unify_severity,
 )
+from aegis.core.seal import Ed25519Signer, seal_response
 from aegis.evidence.bundler import _severity  # legacy 5-bucket scorer (differential ref)
 
 
@@ -96,6 +99,192 @@ def test_classify_detects_rd_rt() -> None:
     assert classify_change([_cfg("set routing-instances V route-distinguisher 65000:1")]).touches_rd_rt
     assert classify_change([_cfg("route-target target:65000:100")]).touches_rd_rt
     assert not classify_change([_cfg("interface eth0")]).touches_rd_rt
+
+
+# ── fabric-identity regexes: every vendor spelling, table-driven ────────────────
+# Positives are statements that set the device's own / local-override AS (or an RD/RT) in
+# the spellings real vendors and structured (JSON/XML) renderings use. Negatives are
+# near-misses that must NOT trip the BLOCK floor. Synthetic values only (RFC 5737 / 5398).
+
+_LOCAL_AS_POSITIVE = [
+    "set / network-instance default protocols bgp group ebgp local-as as-number 65001",
+    "local-as as-number 65001",
+    "local-as    as-number    4200000001",
+    "local-as { as-number 65001 }",
+    "local-as {\n  as-number 65001\n}",
+    '{"local-as": {"as-number": 65001}}',
+    '"local-as": [{"as-number": 65001}]',
+    "<local-as><as-number>65001</as-number></local-as>",
+    '"autonomous-system": 65001',
+    "<autonomous-system>65001</autonomous-system>",
+    "set / network-instance default protocols bgp autonomous-system 65001",
+    "set routing-options autonomous-system 65001",
+    "set routing-options autonomous-system 65000.1",
+    "neighbor 192.0.2.1 local-as 65002 no-prepend replace-as",
+    "LOCAL-AS AS-NUMBER 65001",
+    "local_as: 65001",
+    "local-as future-unrecognized-form",     # any local-as text fails closed
+    "router bgp 65001",
+    "router bgp 65000.1",
+]
+_LOCAL_AS_NEGATIVE = [
+    "interface ethernet-1/1\n subinterface 0 ipv4 address 192.0.2.1/31",
+    "ip as-path access-list 10 permit ^65001_",
+    "set protocols bgp group X neighbor 192.0.2.1 description local-site",
+    "description local assets",
+    "set / network-instance default protocols bgp neighbor 192.0.2.1 peer-as 65002",
+    "neighbor 192.0.2.1 remote-as external",
+    "router ospf 1",
+    "vlan 100 name local",
+]
+_PEER_AS_POSITIVE = [
+    "neighbor 192.0.2.1 remote-as 65002",
+    "neighbor 192.0.2.1 remote-as external",
+    "neighbor 192.0.2.1 remote-as internal",
+    "neighbor 192.0.2.1 remote-as 4200000002",
+    "set protocols bgp group X peer-as 65002",
+    "set / network-instance default protocols bgp neighbor 192.0.2.1 peer-as 65002",
+    '"peer-as": 65002',
+    "<peer-as>65002</peer-as>",
+    "PEER-AS 65002",
+]
+_PEER_AS_NEGATIVE = [
+    "interface eth0\n ip address 192.0.2.1/31",
+    "neighbor 192.0.2.1 description uplink",
+    "set protocols bgp group X local-as 65001",       # local, not peer
+]
+
+
+def _hitl_policy():
+    old = os.environ.get("AEGIS_PEER_AS_POLICY")
+    os.environ.pop("AEGIS_PEER_AS_POLICY", None)      # D1 default: hitl
+    return old
+
+
+def _restore_policy(old) -> None:
+    if old is None:
+        os.environ.pop("AEGIS_PEER_AS_POLICY", None)
+    else:
+        os.environ["AEGIS_PEER_AS_POLICY"] = old
+
+
+def test_local_as_forms_set_touches_asn() -> None:
+    old = _hitl_policy()
+    try:
+        for text in _LOCAL_AS_POSITIVE:
+            cc = classify_change([_cfg(text)])
+            assert cc.touches_asn, f"local-AS form not detected: {text!r}"
+            assert required_authority(Severity.LOW, cc) == Tier.BLOCK, f"not BLOCK: {text!r}"
+        for text in _LOCAL_AS_NEGATIVE:
+            assert not classify_change([_cfg(text)]).touches_asn, f"false local-AS hit: {text!r}"
+    finally:
+        _restore_policy(old)
+
+
+def test_peer_as_forms_set_peer_flag_or_block() -> None:
+    old = _hitl_policy()
+    try:
+        for text in _PEER_AS_POSITIVE:
+            cc = classify_change([_cfg(text)])
+            assert cc.touches_peer_as and not cc.touches_asn, f"peer-AS form (hitl): {text!r}"
+            assert required_authority(Severity.LOW, cc) >= Tier.HITL, f"peer below HITL: {text!r}"
+        for text in _PEER_AS_NEGATIVE:
+            assert not classify_change([_cfg(text)]).touches_peer_as, f"false peer hit: {text!r}"
+        os.environ["AEGIS_PEER_AS_POLICY"] = "block"  # original: a peer AS is fabric identity
+        for text in _PEER_AS_POSITIVE:
+            cc = classify_change([_cfg(text)])
+            assert cc.touches_asn, f"peer-AS form not BLOCK under policy=block: {text!r}"
+            assert required_authority(Severity.LOW, cc) == Tier.BLOCK
+        for text in _LOCAL_AS_POSITIVE:
+            assert classify_change([_cfg(text)]).touches_asn, f"block policy: {text!r}"
+    finally:
+        _restore_policy(old)
+
+
+_RD_RT_POSITIVE = [
+    "rd 65000:1", "rd 4200000000:1", "rd 10.0.0.1:100", "rd 1.100:100", "rd 65000.65000:1",
+    "rd auto", "RD AUTO", "rt 65000:100", "rt 10.0.0.1:100",
+    " vrf definition CUST\n  rd 10.0.0.1:100",
+    "vrf context CUST\n  rd auto",
+    "vrf-target target:10.0.0.1:1", "vrf-target auto", "vrf-target import target:65000:1",
+    "set extcommunity rt 10.0.0.1:100", "set extcommunity rt 65000.1:100 additive",
+    "set policy-options community C members target:10.0.0.1:1",
+    "set policy-options community C members target:65000.1:1",
+    "set policy-options community C members target:65000:1",
+    "route-target both auto", "route-target import 10.0.0.1:100",
+    "route-distinguisher 10.0.0.1:1",
+    "set / network-instance X protocols bgp-vpn bgp-instance 1 route-distinguisher rd 65000:1",
+    "rd vpn export 10.0.0.1:100", "rt vpn both 65000:100",
+    '"rd": "10.0.0.1:100"', "<rd>10.0.0.1:100</rd>", '"rt": "auto"',
+    "vpn-target 65000:1 export-extcommunity",
+]
+_RD_RT_NEGATIVE = [
+    "interface eth0",
+    "interface Ethernet1/1\n description 3rd floor uplink",
+    "description rd office",
+    "description rt auto-tuned",
+    "description target: new server",
+    "hostname core-rd",
+    "hostname core-rt 1",
+    "ip route 192.0.2.0/24 198.51.100.1",
+    "ntp server 192.0.2.1 prefer",
+    "set protocols bgp group X peer-as 65002",
+]
+
+
+def test_rd_rt_forms_set_touches_rd_rt() -> None:
+    for text in _RD_RT_POSITIVE:
+        cc = classify_change([_cfg(text)])
+        assert cc.touches_rd_rt, f"RD/RT form not detected: {text!r}"
+        assert required_authority(Severity.NONE, cc) == Tier.BLOCK, f"not BLOCK: {text!r}"
+    for text in _RD_RT_NEGATIVE:
+        assert not classify_change([_cfg(text)]).touches_rd_rt, f"false RD/RT hit: {text!r}"
+
+
+def test_classifier_linear_on_hostile_input() -> None:
+    """Regexes stay linear: long near-miss inputs classify in well under a second."""
+    import time
+    hostile = ["rd " + "a" * 200_000, "rt" + " " * 200_000 + "x", "local" + "-" * 100_000,
+               ("rd " * 50_000), "target:" + "1." * 100_000, "autonomous" + "-" * 100_000]
+    t0 = time.monotonic()
+    for text in hostile:
+        classify_change([_cfg(text)])
+    assert time.monotonic() - t0 < 2.0, "classifier is not linear on hostile input"
+
+
+def _run_import(vendor: str, config: str) -> dict:
+    return run_preflight("", backend=SimulatorBackend(converge_fail_rate=0.0,
+                                                      batfish_error_rate=0.0),
+                         lab="single", source="config_import", operator="ci",
+                         imported_configs=[{"device": "leaf-1", "vendor": vendor,
+                                            "config": config}])
+
+
+def test_end_to_end_vendor_spellings_are_block_and_unsealed() -> None:
+    """The shipped path (config_import -> authority -> seal): each spelling the old regexes
+    missed must record required=block, allowed=false, and get NO seal."""
+    old = _hitl_policy()
+    try:
+        signer = Ed25519Signer.generate()
+        cases = [
+            ("srlinux", "set / network-instance default protocols bgp group ebgp "
+                        "local-as as-number 65001"),
+            ("ios", "vrf definition CUST\n rd 10.0.0.1:100"),
+            ("junos", "set routing-instances CUST vrf-target auto"),
+            ("ios", "route-map RM permit 10\n set extcommunity rt 10.0.0.1:100"),
+        ]
+        for vendor, config in cases:
+            b = _run_import(vendor, config)
+            au = b["change"]["authority"]
+            assert au["required"] == "block" and not au["allowed"], f"{config!r}: {au}"
+            seal, reason = seal_response(b, signer, "2026-01-01T00:00:00+00:00")
+            assert seal is None and reason, f"sealed a fabric-identity change: {config!r}"
+        b = _run_import("ios", "interface Loopback9\n description test")
+        au = b["change"]["authority"]
+        assert au["required"] != "block" and not au["change_class"]["touches_asn"] \
+            and not au["change_class"]["touches_rd_rt"], f"a plain change forced to BLOCK: {au}"
+    finally:
+        _restore_policy(old)
 
 
 def test_classify_spine_underlay_heuristic() -> None:

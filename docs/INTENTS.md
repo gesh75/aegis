@@ -108,12 +108,23 @@ export AEGIS_BATFISH_SNAPSHOT_DIR=/var/lib/aegis/snapshot   # configs/<device>.c
 | Device in change | Base file exists? | Mode | What Batfish sees |
 |---|---|---|---|
 | `junos`, change is `set` / `delete` lines | yes | `junos-set-merge` | The base (flattened to set form if hierarchical) plus the change lines, in order |
-| any other vendor | yes | `replace` | The candidate as a **full** device config |
+| any other vendor | yes | `replace` | The candidate as a **full** device config, only when it is shown complete (see below) |
 | any | no | `new` | The candidate as a new device file |
 
 A partial Cisco/EOS/FRR snippet **cannot** be merged safely, because mode context is
-positional. Paste the full running-config (`config_import`). If you submit a snippet anyway,
-Batfish's parse-fidelity check will show a truncated config.
+positional, and Batfish's parse-fidelity check cannot see a truncated config (a well-formed
+partial file parses, and the missing interfaces and routes make every `deny` intent pass
+trivially). Paste the full running-config (`config_import`). A `replace` candidate is accepted
+only when it keeps every top-level block of the reference file (`interface ...`,
+`ip access-list ...`) and loses no lines overall; editing a line (one dropped, one added) is
+fine. Anything else is rejected, every intent becomes `error` and the evidence names the
+device and what is missing. This is a guard against truncation, not proof against a
+deliberately padded config. Post-change verification (`replace` forced, the configs are
+running configs) is not checked this way.
+
+One device is one snapshot file. Two entries in one change that map to the same file
+(`r1`, `r1 `, `R1`, `r1_`) are rejected the same way, so the last entry can never stand in for
+the others.
 
 Fidelity gate: if any candidate file **fails** to parse, every intent becomes `error`.
 Partially unrecognized lines are reported in `fidelity.issues` but do not fail the gate.
@@ -134,7 +145,7 @@ Review them, because unrecognized lines are invisible to every check.
   - deny/allow semantics, including that a vacuous allow is an `error`;
   - the fidelity gate;
   - regressions and fail-closed behavior;
-  - snapshot materialization;
+  - snapshot materialization, including duplicate devices and truncated configs (I14, I15);
   - pipeline blocking;
   - firewall zone resolution and NAT translation checks (I12, I13);
   - HTTP.

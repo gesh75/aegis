@@ -75,14 +75,20 @@ class ChangeClass:
 
 # ── change classification (regex, fail-closed) ──────────────────────────────────
 
-_ASN_RE = re.compile(
-    r"(?:autonomous-system|remote-as|peer-as|local-as)\s+\d+|router\s+bgp\s+\d+",
-    re.IGNORECASE,
-)
-# Local fabric identity only: the device's own AS. remote-as / peer-as name the NEIGHBOR.
-_LOCAL_ASN_RE = re.compile(
-    r"(?:autonomous-system|local-as)\s+\d+|router\s+bgp\s+\d+", re.IGNORECASE)
-_PEER_ASN_RE = re.compile(r"(?:remote-as|peer-as)\s+\d+", re.IGNORECASE)
+# AS detection is KEYWORD-based, not value-based, so it FAILS CLOSED: whatever separates the
+# keyword from the value (``as-number`` token, brace, quote, colon, XML tag, ``external`` /
+# ``internal``) or whatever the value looks like, the statement still counts. A fixed
+# ``keyword<space>digits`` shape missed SR Linux ``local-as as-number N``, ``local-as {
+# as-number N }`` and JSON/XML renderings, which lost the BLOCK floor.
+#
+# Local fabric identity only: the device's own AS (or a local-override AS). remote-as /
+# peer-as name the NEIGHBOR. ``router bgp N`` keeps its digits (a bare ``router bgp`` is
+# also FortiOS' stanza header, where an unconditional match would change the D1 policy).
+_LOCAL_AS_KW = r"autonomous[-_]system|local[-_]as"
+_PEER_AS_KW = r"remote[-_]as|peer[-_]as"
+_LOCAL_ASN_RE = re.compile(rf"{_LOCAL_AS_KW}|router\s+bgp\s+\d+", re.IGNORECASE)
+_PEER_ASN_RE = re.compile(_PEER_AS_KW, re.IGNORECASE)
+_ASN_RE = re.compile(rf"{_LOCAL_AS_KW}|{_PEER_AS_KW}|router\s+bgp\s+\d+", re.IGNORECASE)
 
 
 def peer_as_policy() -> str:
@@ -94,8 +100,20 @@ def peer_as_policy() -> str:
     if raw not in ("block", "hitl"):
         raise ValueError(f"AEGIS_PEER_AS_POLICY must be block|hitl (got {raw!r})")
     return raw
+
+
+# RD / RT detection, again keyword-first and value-agnostic. A value is ``auto``, or
+# ``<admin>:<nn>`` where <admin> is a decimal ASN (4-byte too), an asdot ``65000.1`` or an
+# IPv4 address, so ``[\w.]+:\d+`` covers them all. The bare ``rd`` / ``rt`` keywords must
+# be followed by such a value (or FRR's ``vpn``) so a hostname or description that merely
+# contains "rd" does not trip the floor; up to 4 separator characters (space, quote, colon,
+# ``=``, ``<``, ``>``) allow the JSON / XML renderings. One quantifier per class, no
+# adjacent overlapping ones: linear.
+_RD_RT_VALUE = r"(?:auto(?![\w-])|vpn(?![\w-])|[\w.]+:\d+)"
 _RD_RT_RE = re.compile(
-    r"route-(?:distinguisher|target)|\brd\s+\d+:\d+|\brt\s+\d+:\d+|target:\d+:\d+",
+    r"route[-_](?:distinguisher|target)|vrf[-_]target|vpn[-_]target"
+    rf"|(?<![\w-])(?:rd|rt)[\s\"':=<>]{{1,4}}{_RD_RT_VALUE}"
+    r"|target:(?:auto(?![\w-])|[\w.]+:\d+)",
     re.IGNORECASE,
 )
 _UNDERLAY_CONFIG_RE = re.compile(r"\b(?:underlay|ospf|isis|is-is)\b", re.IGNORECASE)

@@ -17,6 +17,10 @@
       deny/allow semantics as reachability; spec rejects bad zone/node names
   I13 nat: translated/untranslated against post-NAT headers; undelivered flow fails; no
       trace is an error; ECMP traces must all agree; spec enforces field combinations
+  I14 duplicate devices in one change are rejected (one device = one snapshot file); the
+      rejection names the device and every intent becomes an error row, never a pass
+  I15 a non-Junos config may replace a reference file only when it is shown to be complete
+      (no dropped block, no net line loss); a truncated snippet is rejected fail closed
 
 Usage:  python3 -m aegis.tests.intents_test
 """
@@ -25,10 +29,13 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
+import types
 
+from ..core import intents as _intents_pkg
 from ..core.intents import IntentSpecError, OracleError, check_intents, parse_intents
 from ..core.intents.runner import run_intents
-from ..core.intents.snapshot import materialize
+from ..core.intents.snapshot import SnapshotError, materialize
 from ..core.orchestrator.pipeline import run_preflight
 from ..core.backends.simulator import SimulatorBackend
 from ..evidence.bundler import verify
@@ -193,7 +200,9 @@ def snapshots() -> None:
             "r1": "hostname r1\n!\ninterface Gi0/0\n ip address 10.0.0.1 255.255.255.0\n"}
     cfgs = [{"device": "mx1", "vendor": "junos",
              "config": 'set protocols bgp group G authentication-key "$9$x"'},
-            {"device": "r1", "vendor": "ios", "config": "hostname r1\n! full replacement\n"},
+            {"device": "r1", "vendor": "ios",
+             "config": "hostname r1\n! full replacement\n!\ninterface Gi0/0\n"
+                       " ip address 10.0.0.9 255.255.255.0\n"},
             {"device": "new-leaf", "vendor": "junos", "config": "set system host-name new-leaf"}]
     ref, cand, log = materialize(cfgs, base)
     modes = {m["device"]: m["mode"] for m in log}
@@ -420,6 +429,219 @@ def nat() -> None:
                                                                             "nat"})
 
 
+FIX = os.path.join(os.path.dirname(__file__), "fixtures", "batfish")
+
+
+def _read(*parts: str) -> str:
+    with open(os.path.join(FIX, *parts), encoding="utf-8") as fh:
+        return fh.read()
+
+
+class _FakeBatfish:
+    """Stands in for batfish_oracle (pybatfish is optional). It records the snapshots it is
+    handed and 'verifies' them as clean, which is what a real Batfish says about a truncated
+    config: the flows end in NO_ROUTE, so every deny intent passes."""
+    seen: list = []
+
+    def __init__(self, host, network, reference, candidate):
+        _FakeBatfish.seen.append((reference, candidate))
+
+    def __enter__(self):
+        return Fixture(), Fixture()
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _with_engine(base: dict[str, str], fn):
+    """Run ``fn()`` with AEGIS_BATFISH_HOST set, a reference snapshot dir holding ``base``
+    ({name: text}) and the fake Batfish module; everything is restored afterwards."""
+    keys = ("AEGIS_BATFISH_HOST", "AEGIS_BATFISH_SNAPSHOT_DIR")
+    saved = {k: os.environ.get(k) for k in keys}
+    modname = _intents_pkg.__name__ + ".batfish_oracle"
+    prev_mod = sys.modules.get(modname)
+    fake = types.ModuleType(modname)
+    fake.BatfishSnapshots = _FakeBatfish
+    _FakeBatfish.seen = []
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "configs"))
+            for name, text in base.items():
+                with open(os.path.join(tmp, "configs", f"{name}.cfg"), "w",
+                          encoding="utf-8") as fh:
+                    fh.write(text)
+            os.environ["AEGIS_BATFISH_HOST"] = "127.0.0.1"
+            os.environ["AEGIS_BATFISH_SNAPSHOT_DIR"] = tmp
+            sys.modules[modname] = fake
+            return fn()
+    finally:
+        if prev_mod is None:
+            sys.modules.pop(modname, None)
+        else:
+            sys.modules[modname] = prev_mod
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def _rejects(configs: list[dict], base: dict[str, str], replace: bool = False) -> str | None:
+    """The SnapshotError text, or None when materialize accepted the change."""
+    try:
+        materialize(configs, base, replace=replace)
+    except SnapshotError as exc:
+        return str(exc)
+    return None
+
+
+def duplicates() -> None:
+    mx = "#RANCID-CONTENT-TYPE: juniper\nset system host-name r1\n"
+    base = {"r1": mx, "r2": "hostname r2\n"}
+    permit = {"device": "r1", "vendor": "junos", "config":
+              "set security policies from-zone untrust to-zone trust policy x then permit"}
+    harmless = {"device": "r1", "vendor": "junos", "config": "set system host-name r1"}
+    msg = _rejects([permit, harmless], base)
+    check("I14.dup_rejected", msg is not None and "r1" in msg, str(msg))
+    for variant in ("r1 ", " r1", "r1_", "r1.", "R1", "r1\t"):
+        msg = _rejects([permit, dict(harmless, device=variant)], base)
+        check(f"I14.dup_variant_{variant!r}", msg is not None, "collapsed onto the same file")
+    check("I14.distinct_devices_ok",
+          _rejects([permit, dict(harmless, device="r2")], base) is None)
+    check("I14.dup_rejected_replace_mode",
+          _rejects([permit, harmless], base, replace=True) is not None)
+    check("I14.dup_rejected_new_devices",
+          _rejects([dict(permit, device="leaf9"), dict(harmless, device="LEAF9")], {}) is not None)
+    check("I14.error_names_only_a_short_device",
+          len(_rejects([dict(permit, device="d" * 500), dict(harmless, device="d" * 500)],
+                       {}) or "") < 400)
+    # the reference file is replaced whatever the device name's case
+    _, cand, _ = materialize([{"device": "R1", "vendor": "ios", "config": "hostname r1\n"}],
+                             {"r1": "hostname r1\n"})
+    check("I14.case_replaces_reference_file", sorted(cand) == ["configs/r1.cfg"], str(sorted(cand)))
+
+    # through the runner: nothing reaches the engine, every intent is an error row naming r1
+    ints = parse_intents([DENY, ALLOW])
+
+    def runner_case():
+        return run_intents(ints, [permit, harmless])
+
+    rec = _with_engine(base, runner_case)
+    check("I14.runner_blocks", rec["errors"] == 2 and rec["engine"] == "unavailable"
+          and rec["failed"] == 0 and all(r["status"] == "error" for r in rec["results"])
+          and "r1" in rec["results"][0]["evidence"], json.dumps(rec)[:400])
+    check("I14.engine_never_called", _FakeBatfish.seen == [], str(len(_FakeBatfish.seen)))
+    ok = _with_engine(base, lambda: run_intents(parse_intents([DENY]), [permit]))
+    check("I14.single_entry_still_runs", ok["engine"] == "batfish" and ok["errors"] == 0
+          and ok["results"][0]["status"] == "pass", json.dumps(ok)[:400])
+    check("I14.single_entry_snapshot_has_it",
+          "permit" in _FakeBatfish.seen[-1][1]["configs/r1.cfg"], str(_FakeBatfish.seen[-1]))
+
+    # the whole pipeline: duplicate config_import entries can never be ship_ready
+    sim = SimulatorBackend(converge_fail_rate=0.0, batfish_error_rate=0.0)
+
+    def pipe_case():
+        return run_preflight("", backend=sim, lab="single", source="config_import",
+                             operator="ci", imported_configs=[permit, harmless],
+                             intents=parse_intents([DENY]))
+
+    b = _with_engine(base, pipe_case)
+    check("I14.pipeline_blocks", b["verdict"]["decision"] == "blocked"
+          and b["validation"]["intents"]["errors"] == 1 and verify(b),
+          f"{b['verdict']} {b['validation']['intents']['errors']}")
+
+
+_R1_BASE = _read("reference", "configs", "r1.cfg")
+_FW2_BASE = _read("firewall", "reference", "configs", "fw2.cfg")
+_MX_BASE = ("system {\n    host-name mx1;\n}\nprotocols {\n    bgp {\n        group G {\n"
+            "            neighbor 192.0.2.1;\n        }\n    }\n}\n")
+
+
+def _ios(config: str, device: str = "r1") -> list[dict]:
+    return [{"device": device, "vendor": "ios", "config": config}]
+
+
+def completeness() -> None:
+    base = {"r1": _R1_BASE}
+    # complete configs are replaced: the shipped fixtures, an edited line, an added block
+    _, cand, log = materialize(_ios(_read("candidate_r1.cfg")), base)
+    check("I15.fixture_candidate_accepted", log[0]["mode"] == "replace"
+          and cand["configs/r1.cfg"].startswith("!\nhostname r1"), str(log))
+    check("I15.same_config_accepted", _rejects(_ios(_R1_BASE), base) is None)
+    edited = _R1_BASE.replace("10.20.0.1 255.255.255.0", "10.20.0.9 255.255.255.0")
+    check("I15.edited_line_accepted", _rejects(_ios(edited), base) is None)
+    check("I15.added_block_accepted",
+          _rejects(_ios(_R1_BASE.replace("!\nend\n", "!\ninterface Loopback9\n ip address "
+                                         "192.0.2.9 255.255.255.255\n!\nend\n")), base) is None)
+    _, cand, log = materialize([{"device": "fw2", "vendor": "panos",
+                                 "config": _read("firewall", "candidate_fw2.cfg")}],
+                               {"fw2": _FW2_BASE})
+    check("I15.panos_full_accepted", log[0]["mode"] == "replace", str(log))
+
+    # the finding's PoC: CDE interface left out, guest ACL opened -> rejected, named
+    poc = ("hostname r1\n!\ninterface GigabitEthernet0/1\n description GUEST\n"
+           " ip address 10.50.0.1 255.255.0.0\n ip access-group OPEN in\n!\n"
+           "interface GigabitEthernet0/2\n description WEB\n"
+           " ip address 10.20.0.1 255.255.255.0\n!\nip access-list extended OPEN\n"
+           " permit ip any any\n!\nend\n")
+    msg = _rejects(_ios(poc), base)
+    check("I15.poc_rejected", msg is not None and "r1" in msg and "GigabitEthernet0/0" in msg,
+          str(msg))
+    cases = {
+        "one_line": "hostname r1\n",
+        "changed_acl_only": "ip access-list extended GUEST_IN\n permit ip any any\n",
+        "one_interface_only": "interface GigabitEthernet0/1\n ip address 10.50.0.1 255.255.0.0\n",
+        "empty": "",
+        "comments_only": "! nothing\n!\nend\n",
+        "block_header_without_body": _R1_BASE.replace(
+            " description CDE\n ip address 10.10.0.1 255.255.255.0\n", ""),
+        "pure_line_deletion": _R1_BASE.replace(" deny   ip 10.50.0.0 0.0.255.255 "
+                                               "10.10.0.0 0.0.0.255\n", ""),
+    }
+    for name, text in cases.items():
+        msg = _rejects(_ios(text), base)
+        check(f"I15.truncated_{name}", msg is not None and "r1" in msg, str(msg))
+    msg = _rejects([{"device": "fw2", "vendor": "panos", "config": "\n".join(
+        _FW2_BASE.splitlines()[:10]) + "\n"}], {"fw2": _FW2_BASE})
+    check("I15.panos_truncated_rejected", msg is not None and "fw2" in msg, str(msg))
+    # Junos curly-brace full configs are compared as set lines
+    mx = {"mx1": _MX_BASE}
+    full = _MX_BASE.replace("neighbor 192.0.2.1;", "neighbor 192.0.2.1;\n            "
+                            "neighbor 192.0.2.5;")
+    check("I15.junos_hier_full_accepted",
+          _rejects([{"device": "mx1", "vendor": "junos", "config": full}], mx) is None)
+    check("I15.junos_hier_truncated_rejected",
+          _rejects([{"device": "mx1", "vendor": "junos",
+                     "config": "system {\n    host-name mx1;\n}\n"}], mx) is not None)
+    # not applied where it must not be: post-change running configs, new devices, junos deltas
+    check("I15.replace_mode_unrestricted", _rejects(_ios("hostname r1\n"), base,
+                                                    replace=True) is None)
+    check("I15.new_device_accepted", _rejects(_ios("hostname n9\n", "n9"), base) is None)
+    _, _, log = materialize([{"device": "mx1", "vendor": "junos",
+                              "config": "set system host-name mx1"}], mx)
+    check("I15.junos_delta_still_merges", log[0]["mode"] == "junos-set-merge", str(log))
+
+    # end to end (fake engine says "clean"): the truncated config can never be ship_ready,
+    # the complete one is judged by the intents as before
+    ints = parse_intents([DENY])
+    sim = SimulatorBackend(converge_fail_rate=0.0, batfish_error_rate=0.0)
+
+    def pipe(config):
+        return run_preflight("", backend=sim, lab="single", source="config_import",
+                             operator="ci", imported_configs=_ios(config), intents=ints)
+
+    bad = _with_engine(base, lambda: pipe(poc))
+    check("I15.pipeline_truncated_blocked", bad["verdict"]["decision"] == "blocked"
+          and bad["validation"]["intents"]["errors"] == 1
+          and "GigabitEthernet0/0" in bad["validation"]["intents"]["results"][0]["evidence"]
+          and verify(bad), f"{bad['verdict']}")
+    good = _with_engine(base, lambda: pipe(_read("candidate_r1.cfg")))
+    check("I15.pipeline_complete_not_blocked_by_snapshot",
+          good["validation"]["intents"]["errors"] == 0
+          and good["validation"]["intents"]["engine"] == "batfish",
+          json.dumps(good["validation"]["intents"])[:300])
+
+
 def main() -> int:
     http()
     firewall()
@@ -427,6 +649,8 @@ def main() -> int:
     spec()
     semantics()
     snapshots()
+    duplicates()
+    completeness()
     pipeline()
     if FAILS:
         print("\n=== INTENTS TEST: FAIL ===")

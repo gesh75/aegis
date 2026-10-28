@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 
 from .engine import check_intents
-from .snapshot import materialize, read_base
+from .snapshot import SnapshotError, materialize, read_base
 
 
 def run_intents(intents: list[dict], configs: list[dict], replace: bool = False) -> dict:
@@ -34,6 +34,9 @@ def run_intents(intents: list[dict], configs: list[dict], replace: bool = False)
         return check_intents(intents, candidate=None,
                              unavailable_reason=f"reference snapshot unreadable: "
                                                 f"{type(exc).__name__}")
+    except SnapshotError as exc:   # duplicate device / config not shown complete
+        return check_intents(intents, candidate=None,
+                             unavailable_reason=f"candidate snapshot rejected: {exc}")
     snap_meta = {"reference": reference is not None, "merge": log,
                  "reference_files": len(reference or {}), "candidate_files": len(candidate)}
     try:
