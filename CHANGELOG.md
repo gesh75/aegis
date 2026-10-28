@@ -5,6 +5,13 @@ versioning is [SemVer](https://semver.org).
 
 ## [Unreleased]
 
+### Security
+Fixes for the 10 aegis findings of the 2026-10-27 Claude Security scan. **Behaviour change** marks what an operator will notice.
+
+- **Approvals fail closed (behaviour change):** with `AEGIS_APPROVE_KEY` unset every approval is denied; no free-text approver counts, in any mode. To promote a change that needs approval, set `AEGIS_APPROVE_KEY`, `AEGIS_API_KEY` and `AEGIS_APPROVER_KEYS`. `/api/status` reports `approve_hmac: unset-approvals-denied`.
+- **Who approved (behaviour change):** an `approver` sent in a run request is never a granted approval (recorded as `claimed_approver`, unverified). The gate demands a verified approval for HITL/HOTL authority whatever the risk tier, so a 2-3 device change now needs one. Separation of duties compares the authenticated operator from `X-Aegis-Approver-Key` and denies when there is none (the UI has an optional "your credential" field). Approval tokens are accepted only in their canonical encoding, so a re-encoded token cannot be replayed. With `AEGIS_NETBOX_URL` set, promotion re-checks a v2 token's inventory binding against NetBox (403 on drift, 503 on an outage, the token is not spent).
+- **Intents and risk:** duplicate devices in one change are rejected (`PreflightError` up front, `SnapshotError` in the intent layer). A non-Junos config only replaces a reference file when it is shown complete (it keeps every top-level block and loses no net lines), so a full config that removes a whole block is rejected at the intent stage. The local-AS, peer-AS and RD/RT detectors are keyword-first: SR Linux `local-as as-number`, IP-form / asdot / `auto` RD and RT, `remote-as external`.
+
 ### Firewall and NAT intents (Juniper SRX, Palo Alto)
 - `firewall_policy`: zone-to-zone **transit** policy on one firewall. Zones resolve to
   every `from_zone` interface through Batfish `interfaceProperties`, and an unknown zone
