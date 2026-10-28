@@ -21,6 +21,8 @@
       backend by default even with ANTHROPIC_API_KEY; HttpBackend refuses a non-loopback
       model URL by default
   H14 guard-rejected preflights and denied mints are recorded in the ledger
+  H18 a v2 approval's inventory binding is re-checked at promotion against the LIVE source
+      of truth (server-side; the request cannot opt out) and denies on drift or outage
   H17 separation of duties uses the AUTHENTICATED operator (recorded from the personal
       credential, never from the request body) and denies when there is none
   H16 authority HITL/HOTL always needs a verified second-person approval at the gate and is
@@ -752,6 +754,124 @@ def operator_identity() -> None:
         os.environ.pop("AEGIS_APPROVE_KEY", None)
 
 
+def inventory_binding_at_promotion() -> None:
+    """W17qDJe8: approval was granted while NetBox showed inventory N; after NetBox moves to
+    N+1 the same token must not promote, and omitting inventory_sha256 must not skip that.
+    NetBox is an in-process httpx.MockTransport on a loopback URL: no socket is opened."""
+    import base64
+    import httpx
+    from .. import serve
+    from ..serve import app, _LEDGER
+    c = app.test_client()
+    state = {"stamp": "2026-10-01T00:00:00Z", "status": 200}
+
+    def fake_netbox(req):
+        if state["status"] != 200:
+            return httpx.Response(state["status"], text="down")
+        names = req.url.params.get_list("name")
+        return httpx.Response(200, json={"results": [
+            {"name": n, "role": {"slug": "leaf"}, "status": {"value": "active"},
+             "primary_ip": None, "last_updated": state["stamp"]} for n in names]})
+
+    orig = serve.netbox.NetBoxClient
+
+    class Patched(orig):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, transport=httpx.MockTransport(fake_netbox), **kw)
+
+    cred = {"alice": "alice-cred-000000000000", "bob": "bob-cred-00000000000000"}
+    reg = ",".join(f"{n}:{hashlib.sha256(k.encode()).hexdigest()}" for n, k in cred.items())
+    env = {"AEGIS_APPROVE_KEY": KEY, "AEGIS_API_KEY": API, "AEGIS_APPROVER_KEYS": reg,
+           "AEGIS_NETBOX_URL": "https://127.0.0.1:8443", "AEGIS_NETBOX_TOKEN": "nbtok"}
+    saved = {k: os.environ.get(k) for k in env}
+    os.environ.update(env)
+    serve.netbox.NetBoxClient = Patched
+    api = {"X-Aegis-Key": API}
+    try:
+        r = c.post("/api/preflight/run", json={"intent": "add vlan 10 to leaf-1", "lab": "single"},
+                   headers={**api, "X-Aegis-Approver-Key": cred["alice"]})
+        b = r.get_json() or {}
+        rev = (b.get("twin") or {}).get("inventory_rev", "")
+        check("H18.run_sealed_netbox_rev", r.status_code == 200 and rev.startswith("netbox:")
+              and b.get("seal"), f"{r.status_code} rev={rev!r}")
+
+        def mint() -> str:
+            m = c.post("/api/approve/mint", json={"bundle": b},
+                       headers={**api, "X-Aegis-Approver-Key": cred["bob"]})
+            return (m.get_json() or {}).get("token")
+
+        def promote_req(tok, **extra):
+            return c.post("/api/preflight/promote", headers=api, json={
+                "bundle": b, "approver": "bob", "approval_token": tok,
+                "connector": "dry_run", **extra})
+
+        tok_drift, tok_outage, tok_ok = mint(), mint(), mint()
+        check("H18.minted", all((tok_drift, tok_outage, tok_ok)))
+        claim_inv = json.loads(base64.urlsafe_b64decode(tok_drift.split(".")[1] + "==")).get("inv")
+
+        # NetBox moves to inventory N+1 AFTER approval, inside the token TTL
+        state["stamp"] = "2026-10-02T09:30:00Z"
+        r = promote_req(tok_drift)                       # no inventory_sha256 in the request
+        check("H18.drift_denied_without_request_field", r.status_code == 403
+              and "inventory" in r.get_data(as_text=True),
+              f"{r.status_code} {r.get_data(as_text=True)[:200]}")
+        r = promote_req(tok_drift, inventory_sha256=claim_inv)   # client echoes the OLD value
+        check("H18.client_cannot_override_live_value", r.status_code == 403
+              and "inventory" in r.get_data(as_text=True),
+              f"{r.status_code} {r.get_data(as_text=True)[:200]}")
+
+        # NetBox unreachable: the check cannot be computed -> deny, and the token is NOT burned
+        state["status"] = 503
+        before = [e["kind"] for e in _LEDGER.entries()].count("promotion")
+        r = promote_req(tok_outage)
+        check("H18.outage_denied", r.status_code == 503 and (r.get_json() or {}).get("denied") is True
+              and "source of truth" in r.get_data(as_text=True),
+              f"{r.status_code} {r.get_data(as_text=True)[:200]}")
+        check("H18.outage_promotes_nothing",
+              [e["kind"] for e in _LEDGER.entries()].count("promotion") == before)
+
+        # NetBox back at the inventory the approval saw: the same (unspent) token promotes
+        state["status"], state["stamp"] = 200, "2026-10-01T00:00:00Z"
+        r = promote_req(tok_ok)
+        rec = r.get_json() or {}
+        check("H18.unchanged_inventory_promotes", r.status_code == 200
+              and rec.get("approval", {}).get("method") == "hmac-sha256",
+              f"{r.status_code} {r.get_data(as_text=True)[:200]}")
+        check("H18.record_says_verified_against_netbox",
+              rec.get("approval", {}).get("inventory_verified") is True
+              and rec.get("approval", {}).get("inventory_source") == "netbox"
+              and rec.get("approval", {}).get("live_inventory_sha256") == claim_inv,
+              str(rec.get("approval")))
+        r = promote_req(tok_outage)                      # unspent: proves the outage deny kept it
+        check("H18.outage_did_not_burn_token", r.status_code == 200, f"{r.status_code}")
+    finally:
+        serve.netbox.NetBoxClient = orig
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    # no source of truth configured: nothing to re-check against, and the record says so
+    os.environ.update({"AEGIS_APPROVE_KEY": KEY, "AEGIS_API_KEY": API, "AEGIS_APPROVER_KEYS": reg})
+    try:
+        r = c.post("/api/preflight/run", json={"intent": "add vlan 10 to leaf-1", "lab": "single"},
+                   headers={**api, "X-Aegis-Approver-Key": cred["alice"]})
+        b = r.get_json() or {}
+        m = c.post("/api/approve/mint", json={"bundle": b},
+                   headers={**api, "X-Aegis-Approver-Key": cred["bob"]})
+        r = c.post("/api/preflight/promote", headers=api, json={
+            "bundle": b, "approver": "bob", "approval_token": (m.get_json() or {}).get("token"),
+            "connector": "dry_run"})
+        ap = (r.get_json() or {}).get("approval", {})
+        check("H18.no_source_not_presented_as_verified", r.status_code == 200
+              and ap.get("inventory_verified") is False and ap.get("inventory_source") == "none",
+              f"{r.status_code} {ap}")
+    finally:
+        for k in ("AEGIS_APPROVE_KEY", "AEGIS_API_KEY", "AEGIS_APPROVER_KEYS"):
+            os.environ.pop(k, None)
+
+
 def main() -> int:
     airgap_default()
     rejections_ledgered()
@@ -765,6 +885,7 @@ def main() -> int:
     runtime_approver_not_granted()
     authority_requires_approval()
     operator_identity()
+    inventory_binding_at_promotion()
     if FAILS:
         print("\n=== HARDENING TEST: FAIL ===")
         for f in FAILS:

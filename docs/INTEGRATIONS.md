@@ -69,7 +69,9 @@ target devices (`GET /api/dcim/devices/?name=...`):
 | Output | Where | Effect |
 |---|---|---|
 | Device role | `twin.device_roles` | A role in `AEGIS_NETBOX_SPINE_ROLES` (default `spine,super-spine`) sets `touches_spine`. A role in `AEGIS_NETBOX_UNDERLAY_ROLES` (default `super-spine,underlay,core`) sets `touches_underlay`. Roles only **add** flags on top of the name/protocol heuristic; they never clear one. |
-| `inventory_rev` = `netbox:<sha256>` over the sorted name, role, status, primary IP and last_updated | `twin.inventory_rev` | Sealed in the bundle and folded into the v2 approval token's inventory digest. If NetBox changes between approval and push, the token no longer verifies. |
+| `inventory_rev` = `netbox:<sha256>` over the sorted name, role, status, primary IP and last_updated | `twin.inventory_rev` | Sealed in the bundle and folded into the v2 approval token's inventory digest. At promotion the server re-queries NetBox for the bundle's devices and recomputes the digest from the live revision (a value in the promote request is ignored). If NetBox changed between approval and push, the promotion is denied (403); if NetBox cannot answer, it is denied (503) and the token is not spent. |
+
+Without `AEGIS_NETBOX_URL` there is no live source: the approval's inventory claim is not re-checked and the promotion record says `approval.inventory_verified: false` (`inventory_source: "none"`). Only a server-derived NetBox value is recorded as `inventory_verified: true`. A bundle sealed without NetBox cannot be promoted after NetBox is switched on (its inventory claim no longer matches); re-run it.
 
 If NetBox is unreachable, production rejects the run (fail closed, ledgered as
 `preflight_rejected`). The community tier records `netbox:unavailable` and falls back to

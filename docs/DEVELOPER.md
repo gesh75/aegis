@@ -158,7 +158,7 @@ The seal (`core/seal/seal.py`) additionally refuses to certify an unbounded chan
 | POST | `/api/preflight/evidence/oscal` | OSCAL-shaped AR JSON. Same integrity gate. Not FedRAMP. |
 | POST | `/api/preflight/evidence/cab` | CAB one-pager. Rollback is a plan, not a verified execution. |
 | POST | `/api/approve/mint` | HMAC token. Body `{bundle}` → **v2** (config + inventory). Hash-only → **v1**. Tampered bundle → **422**. **503** if HMAC unset. |
-| POST | `/api/preflight/promote` | Gate G0–G5 + SoD + single-use, then dry-run (default). Optional `inventory_sha256` live override. **403** on deny. |
+| POST | `/api/preflight/promote` | Gate G0–G5 + SoD + single-use, then dry-run (default). With `AEGIS_NETBOX_URL` set the server re-queries NetBox for the bundle's devices and checks the v2 token's inventory claim against that live value (the request's `inventory_sha256` is ignored); NetBox down → **503** `denied`. Without NetBox, `inventory_sha256` is an optional caller override and the record says `inventory_verified: false`. **403** on deny. |
 | POST | `/api/integrations/servicenow/sync` | Sealed bundle → verdict + redacted PDF attached to its CHG; blocked → on hold. Needs `AEGIS_API_KEY` + `AEGIS_SNOW_URL` (**503** otherwise). See `docs/INTEGRATIONS.md`. |
 | POST | `/api/postchange/verify` | `{bundle, running_configs, intents?}` → verified / drift / failed / unverifiable. Bundle must carry this server's seal (**422**). |
 | GET | `/api/seal/pubkey` | Offline verify material (public). |
@@ -201,7 +201,8 @@ jq -n --slurpfile b bundle.json --slurpfile t token.json \
 | promote **403** G0 | The seal is missing, foreign, or mismatched. | Use the bundle exactly as `/run` returned it. |
 | promote **403** "AEGIS_APPROVE_KEY … is not set" | The change needs approval and the server has no HMAC key, so no approval can be verified. | Set `AEGIS_APPROVE_KEY` and `AEGIS_API_KEY`, restart, mint a token. |
 | promote **403** "already used" | Single-use token replay. | Mint a new token. |
-| promote **403** inventory | The live `inventory_sha256` differs from the one the token was bound to. | Re-run against the current inventory. |
+| promote **403** inventory | The live inventory (NetBox, re-read at promotion) differs from the one the token was bound to. | Re-run the preflight against the current inventory and re-approve. |
+| promote **503** "source of truth unavailable" | NetBox is configured but did not answer, so the inventory binding cannot be verified. Nothing is promoted and the token is not spent. | Restore NetBox and retry. |
 
 ---
 

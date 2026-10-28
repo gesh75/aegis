@@ -149,6 +149,9 @@ def run(n: int = 4000) -> dict:
                     fails.append(f"v2 bound token method={(rec_v2.get('approval') or {}).get('method')!r}")
                 if rec_v2.get("approval", {}).get("live_inventory_sha256"):
                     fails.append("live inventory recorded when none was supplied")
+                if (rec_v2.get("approval", {}).get("inventory_verified") is not False
+                        or rec_v2["approval"].get("inventory_source") != "none"):
+                    fails.append("approval presented as inventory-verified with no live source")
             except PromoteDenied as e:
                 fails.append(f"v2 bound HMAC token denied: {e}")
             try:

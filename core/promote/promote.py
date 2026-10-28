@@ -37,7 +37,8 @@ def promote(bundle: dict, *, connector: ProdConnector, approver: str | None = No
             approval_token: str | None = None, allow_live: bool = False,
             live_inventory_sha256: str | None = None, ledger=None,
             seal: dict | None = None, verifier=None, require_seal: bool = False,
-            require_verified_approval: bool = False) -> dict:
+            require_verified_approval: bool = False,
+            inventory_source: str | None = None) -> dict:
     configs = (bundle.get("change") or {}).get("generated_configs") or []
     if not configs:
         raise PromoteDenied("nothing to promote")
@@ -76,6 +77,10 @@ def promote(bundle: dict, *, connector: ProdConnector, approver: str | None = No
         all_ok = all_ok and bool(r.get("pushed"))
         pushed.append({"device": c["device"], "vendor": c["vendor"], **r})
 
+    # where the live inventory fingerprint came from. Only "netbox" (derived server-side
+    # from the source of truth just now) counts as verified; a caller-supplied value is
+    # recorded as such, and with neither the approval's inventory claim was not re-checked.
+    inventory_source = inventory_source or ("client" if live_inventory_sha256 else "none")
     record = {
         "promotion_id": uuid.uuid4().hex,
         "source_run_id": bundle["run_id"],
@@ -90,6 +95,8 @@ def promote(bundle: dict, *, connector: ProdConnector, approver: str | None = No
             "token_sha256": decision.token_sha256,
             "bound_bundle_sha256": bundle["integrity"]["sha256"] if decision.token_sha256 else None,
             "live_inventory_sha256": live_inventory_sha256 or None,
+            "inventory_source": inventory_source,
+            "inventory_verified": inventory_source == "netbox",
         },
         "gate_reason": decision.reason,
         "status": "promoted" if all_ok else "partial",
@@ -101,5 +108,6 @@ def promote(bundle: dict, *, connector: ProdConnector, approver: str | None = No
         ledger.append("promotion", promotion_id=record["promotion_id"], run_id=run_id,
                       source_sha256=src_sha, record_sha256=record["integrity"]["sha256"],
                       connector=record["connector"], status=record["status"],
-                      approver=approver, approval_method=decision.approval_method)
+                      approver=approver, approval_method=decision.approval_method,
+                      inventory_source=inventory_source)
     return record

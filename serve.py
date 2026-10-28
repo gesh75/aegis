@@ -32,7 +32,7 @@ from aegis.core.promote.promote import promote, PromoteDenied
 from aegis.core.promote.connectors import get_connector
 from aegis.core.promote.tokens import (
     TokenError, hmac_configured, mint_token, mint_token_for_bundle,
-    digests_from_bundle, load_approve_key,
+    digests_from_bundle, inventory_digest, load_approve_key,
 )
 from aegis.core.promote import approvers
 from aegis.core import runtime
@@ -584,13 +584,33 @@ def preflight_promote():
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     allow_live = (os.environ.get("AEGIS_PROMOTE_ALLOW_LIVE") or "").strip() == "1"
+    # W17qDJe8: with a source of truth configured the server derives the live inventory
+    # fingerprint ITSELF; the request cannot supply, override or omit it. If it cannot be
+    # derived the promotion is denied (fail closed). Only a sealed bundle is worth a lookup;
+    # anything else is denied by the gate below. Without NetBox a caller-supplied
+    # inventory_sha256 stays a stricter-only override and the record says "not verified".
+    live_inv = data.get("inventory_sha256")
+    inv_source = None
+    if netbox.configured() and data.get("approval_token") and _sealed_by_us(bundle):
+        try:
+            live_inv, inv_source = _live_inventory_sha256(bundle), "netbox"
+        except IntegrationError as exc:
+            _inc("aegis_integration_calls_total", system="netbox", result="error")
+            _inc("aegis_promotions_total", status="denied")
+            reason = (f"source of truth unavailable ({exc}) — the approval's inventory "
+                      "binding cannot be verified, promotion denied")
+            _LEDGER.append("promotion_denied", run_id=bundle.get("run_id"),
+                           source_sha256=(bundle.get("integrity") or {}).get("sha256"),
+                           approver=data.get("approver"), reason=reason[:300])
+            return jsonify({"error": reason, "denied": True}), 503
+        _inc("aegis_integration_calls_total", system="netbox", result="ok")
     try:
         rec = promote(
             bundle, connector=conn,
             approver=data.get("approver"),
             approval_token=data.get("approval_token"),
             allow_live=allow_live,
-            live_inventory_sha256=data.get("inventory_sha256"),
+            live_inventory_sha256=live_inv, inventory_source=inv_source,
             # A1: the server ALWAYS authenticates the bundle with its pinned seal key —
             # a self-hashed forgery fails G0 before any other rule runs.
             seal=bundle.get("seal"), verifier=_VERIFIER, require_seal=True,
@@ -605,6 +625,30 @@ def preflight_promote():
         return jsonify({"error": _client_error(e)}), 500
     _inc("aegis_promotions_total", status=rec["status"])
     return jsonify(rec)
+
+
+def _sealed_by_us(bundle: dict) -> bool:
+    """Integrity + this server's seal both verify (no exceptions: malformed = False)."""
+    seal = bundle.get("seal")
+    try:
+        return (isinstance(seal, dict) and bundler_verify(bundle)
+                and verify_seal(bundle, seal, _VERIFIER).valid)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _live_inventory_sha256(bundle: dict) -> str:
+    """The inventory fingerprint of the bundle's target devices as the source of truth
+    shows them NOW, in the same form a v2 approval token was bound to. Raises
+    IntegrationError when NetBox cannot answer."""
+    devices = [c["device"] for c in ((bundle.get("change") or {}).get("generated_configs") or [])
+               if isinstance(c, dict) and c.get("device")]
+    client = netbox.NetBoxClient()
+    try:
+        inv = client.inventory(devices)
+    finally:
+        client.close()
+    return inventory_digest(bundle, inventory_rev=str(inv.get("inventory_rev") or ""))
 
 
 def _netbox_lookup(devices: list[str]) -> dict:

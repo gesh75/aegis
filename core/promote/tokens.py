@@ -115,12 +115,14 @@ def config_digest(bundle: dict) -> str:
     return _canonical_hash({"configs": rows})
 
 
-def inventory_digest(bundle: dict) -> str:
+def inventory_digest(bundle: dict, *, inventory_rev: str | None = None) -> str:
     """SHA-256 of the target inventory fingerprint.
 
     Derived from the twin record + the device list in generated configs.
     Optional ``twin.inventory_rev`` is included when present so a source-of-truth
-    revision becomes a first-class claim without a schema bump.
+    revision becomes a first-class claim without a schema bump. ``inventory_rev``
+    replaces the sealed revision with the source of truth's CURRENT one, which is how
+    promotion re-derives the fingerprint a v2 token was bound to (W17qDJe8).
     """
     twin = bundle.get("twin") if isinstance(bundle.get("twin"), dict) else {}
     configs = ((bundle.get("change") or {}).get("generated_configs") or [])
@@ -136,7 +138,8 @@ def inventory_digest(bundle: dict) -> str:
     payload = {
         "devices": devices,
         "engine": str(twin.get("engine") or ""),
-        "inventory_rev": str(twin.get("inventory_rev") or twin.get("rev") or ""),
+        "inventory_rev": str(inventory_rev if inventory_rev is not None
+                             else (twin.get("inventory_rev") or twin.get("rev") or "")),
         "node_count": node_count,
         "topology": str(twin.get("topology") or ""),
     }

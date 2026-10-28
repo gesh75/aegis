@@ -240,6 +240,11 @@ def main() -> int:
         moved["twin"] = dict(sample["twin"], inventory_rev="N+1")
         drift = inventory_digest(moved)
         check("inv.drift_changes_digest", drift != inv, drift)
+        # W17qDJe8: promotion re-derives the digest from the source of truth's CURRENT rev
+        check("inv.live_rev_same_as_sealed", inventory_digest(sample, inventory_rev="N") == inv)
+        check("inv.live_rev_override_equals_moved", inventory_digest(sample, inventory_rev="N+1") == drift)
+        check("inv.live_empty_rev_is_not_a_fallback",
+              inventory_digest(sample, inventory_rev="") != inv)
 
     _with_key(_hmac_suite)
 
