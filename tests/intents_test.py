@@ -36,7 +36,7 @@ from ..core import intents as _intents_pkg
 from ..core.intents import IntentSpecError, OracleError, check_intents, parse_intents
 from ..core.intents.runner import run_intents
 from ..core.intents.snapshot import SnapshotError, materialize
-from ..core.orchestrator.pipeline import run_preflight
+from ..core.orchestrator.pipeline import PreflightError, run_preflight
 from ..core.backends.simulator import SimulatorBackend
 from ..evidence.bundler import verify
 
@@ -537,7 +537,9 @@ def duplicates() -> None:
     check("I14.single_entry_snapshot_has_it",
           "permit" in _FakeBatfish.seen[-1][1]["configs/r1.cfg"], str(_FakeBatfish.seen[-1]))
 
-    # the whole pipeline: duplicate config_import entries can never be ship_ready
+    # the whole pipeline: duplicate config_import entries can never be ship_ready. The
+    # pipeline's own guard refuses them first (PreflightError, nothing sealed or pushed);
+    # the snapshot / runner checks above are the second layer if a caller bypasses it.
     sim = SimulatorBackend(converge_fail_rate=0.0, batfish_error_rate=0.0)
 
     def pipe_case():
@@ -545,10 +547,29 @@ def duplicates() -> None:
                              operator="ci", imported_configs=[permit, harmless],
                              intents=parse_intents([DENY]))
 
-    b = _with_engine(base, pipe_case)
-    check("I14.pipeline_blocks", b["verdict"]["decision"] == "blocked"
-          and b["validation"]["intents"]["errors"] == 1 and verify(b),
-          f"{b['verdict']} {b['validation']['intents']['errors']}")
+    try:
+        b = _with_engine(base, pipe_case)
+        err = None
+    except PreflightError as exc:
+        b, err = None, str(exc)
+    check("I14.pipeline_rejects_with_intents", err is not None and "r1" in err
+          and b is None, str(err if err else b["verdict"]))
+
+    # with NO intents `materialize` never runs, so the pipeline itself must refuse the
+    # duplicate before anything is verified, sealed or pushed (NpqnQPFx, PreflightError)
+    for first, second in (("r1", "r1"), ("r1", "r1 "), ("r1", "R1"), ("r1", "r1_")):
+        try:
+            run_preflight("", backend=sim, lab="single", source="config_import", operator="ci",
+                          imported_configs=[dict(permit, device=first),
+                                            dict(harmless, device=second)])
+            err = None
+        except PreflightError as exc:
+            err = str(exc)
+        check(f"I14.pipeline_no_intents_rejects_{second!r}",
+              err is not None and "r1" in err.lower(), str(err))
+    run_preflight("", backend=sim, lab="single", source="config_import", operator="ci",
+                  imported_configs=[dict(permit, device="r1"), dict(harmless, device="r2")])
+    check("I14.pipeline_no_intents_distinct_devices_ok", True)
 
 
 _R1_BASE = _read("reference", "configs", "r1.cfg")

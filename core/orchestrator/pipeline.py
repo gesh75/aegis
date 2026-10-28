@@ -18,6 +18,7 @@ from ...evidence.bundler import build_bundle, unattested_identity
 from ..risk import (Tier, authority_record, classify_change, load_max_authorized,
                     requires_approval, unify_severity)
 from ..intents.runner import run_intents
+from ..intents.snapshot import _device_key as device_key
 from ...evidence.compliance import map_controls
 
 
@@ -46,6 +47,16 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
             raise PreflightError("config_import requires at least one config")
         if sum(len(c.get("config", "")) for c in imported_configs) > 200_000:
             raise PreflightError("imported config exceeds 200k chars")
+        # one device is one config: two entries that normalize to the same snapshot file would
+        # be sealed and pushed one by one while only the last one is ever verified. With no
+        # intents `materialize` never runs, so the pipeline refuses the duplicate itself.
+        seen: dict[str, str] = {}
+        for i, c in enumerate(imported_configs):
+            name = str(c.get("device") or f"{lab}-import-{i+1}")
+            if device_key(name) in seen:
+                raise PreflightError(f"device {name[:60]!r} appears twice in one change "
+                                     f"(also {seen[device_key(name)][:60]!r}): one config per device")
+            seen[device_key(name)] = name
         intent = intent or f"config-import: {len(imported_configs)} device(s)"
     else:
         pc = guards.precheck_intent(intent)
