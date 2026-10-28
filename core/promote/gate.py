@@ -39,6 +39,7 @@ class GateDecision:
     reason: str
     approval_method: str = "none"
     token_sha256: str | None = None
+    inventory_bound: bool = False   # the approval used carries an inventory claim (v2 token)
 
 
 def evaluate(bundle: dict, *, approver: str | None, approval_token: str | None,
@@ -138,4 +139,5 @@ def evaluate(bundle: dict, *, approver: str | None, approval_token: str | None,
 
     return GateDecision(True, f"{tier or 'unknown'}-risk {decision} approved for promotion",
                         approval.method if has_approval else "none",
-                        approval.token_sha256 if has_approval else None)
+                        approval.token_sha256 if has_approval else None,
+                        approval.inventory_bound if has_approval else False)

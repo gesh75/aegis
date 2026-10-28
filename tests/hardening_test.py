@@ -844,6 +844,16 @@ def inventory_binding_at_promotion() -> None:
               str(rec.get("approval")))
         r = promote_req(tok_outage)                      # unspent: proves the outage deny kept it
         check("H18.outage_did_not_burn_token", r.status_code == 200, f"{r.status_code}")
+        # a v1 (hash-only) token carries no inventory claim: even with NetBox on, the record
+        # must not call that approval inventory-verified
+        m = c.post("/api/approve/mint", json={"bundle_sha256": b["integrity"]["sha256"]},
+                   headers={**api, "X-Aegis-Approver-Key": cred["bob"]})
+        tok_v1 = (m.get_json() or {}).get("token")
+        r = promote_req(tok_v1)
+        ap = (r.get_json() or {}).get("approval", {})
+        check("H18.v1_token_not_presented_as_inventory_verified", r.status_code == 200
+              and (m.get_json() or {}).get("version") == 1 and ap.get("inventory_verified") is False,
+              f"{r.status_code} {ap}")
     finally:
         serve.netbox.NetBoxClient = orig
         for k, v in saved.items():

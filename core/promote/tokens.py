@@ -64,6 +64,7 @@ class Approval:
     method: str  # hmac-sha256 | none
     reason: str
     token_sha256: str | None = None
+    inventory_bound: bool = False   # True only for a verified v2 token (carries an inv claim)
 
 
 def _b64(data: bytes) -> str:
@@ -323,5 +324,5 @@ def verify_approval(approver: str | None, token: str | None, bundle_sha256: str,
             return Approval(False, "none",
                             "token is not bound to this inventory", hashed)
         return Approval(True, "hmac-sha256",
-                        "HMAC verified, bound to bundle, config, and inventory", hashed)
+                        "HMAC verified, bound to bundle, config, and inventory", hashed, True)
     return Approval(True, "hmac-sha256", "HMAC verified, bound to bundle hash", hashed)

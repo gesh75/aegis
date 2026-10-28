@@ -96,7 +96,9 @@ def promote(bundle: dict, *, connector: ProdConnector, approver: str | None = No
             "bound_bundle_sha256": bundle["integrity"]["sha256"] if decision.token_sha256 else None,
             "live_inventory_sha256": live_inventory_sha256 or None,
             "inventory_source": inventory_source,
-            "inventory_verified": inventory_source == "netbox",
+            # verified = the token carries an inventory claim AND the live value came from the
+            # source of truth (a v1 token has no claim to check)
+            "inventory_verified": inventory_source == "netbox" and decision.inventory_bound,
         },
         "gate_reason": decision.reason,
         "status": "promoted" if all_ok else "partial",
