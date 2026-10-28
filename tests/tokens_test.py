@@ -196,11 +196,11 @@ def main() -> int:
             return part[:-1] + alpha[alt]
 
         canon = mint_token("noc-lead", BUNDLE, ttl_sec=600)
-        c_hash = verify_approval("noc-lead", canon, BUNDLE).token_sha256
         for _ in range(200):  # find a token with '-' or '_' so the std-alphabet variant differs
             if "-" in canon or "_" in canon:
                 break
             canon = mint_token("noc-lead", BUNDLE, ttl_sec=600)
+        c_hash = verify_approval("noc-lead", canon, BUNDLE).token_sha256
         pre, pay, mac_part = canon.split(".")
         variants = {
             "pad1": canon + "=",
