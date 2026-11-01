@@ -17,6 +17,7 @@ from . import guards, rollback
 from ...evidence.bundler import build_bundle, unattested_identity
 from ..risk import authority_record, classify_change, load_max_authorized, unify_severity
 from ..intents.runner import run_intents
+from .. import secretref
 from ...evidence.compliance import map_controls
 
 
@@ -34,7 +35,8 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
                   change_ref: str | None = None,
                   intents: list[dict] | None = None,
                   intent_runner=None,
-                  inventory_lookup=None) -> dict:
+                  inventory_lookup=None,
+                  secret_store=None) -> dict:
     frameworks = frameworks or ["pci_dss_v4"]
     run_id = uuid.uuid4().hex
     created = datetime.now(timezone.utc).isoformat()
@@ -138,7 +140,7 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
             load_max_authorized(),
         )
 
-        return build_bundle(
+        bundle = build_bundle(
             run_id=run_id, created=created, operator=operator, intent=intent,
             source=source, configs=configs, batfish=bf, twin=twin, diff=diff,
             compliance=compliance, tier=tier, needs_approval=needs_approval,
@@ -149,6 +151,14 @@ def run_preflight(intent: str, *, backend: Backend, lab: str = "clos-evpn",
             intents=intent_record, verify_errors=verify_errors,
             inventory=inventory,
         )
+        # D3: validation above ran on the real config inside the perimeter; what leaves
+        # the pipeline carries references only. A store failure rejects the run.
+        if secret_store is not None:
+            try:
+                bundle = secretref.protect_bundle(bundle, secret_store)
+            except secretref.SecretStoreError as exc:
+                raise PreflightError(f"secret store: {exc}") from exc
+        return bundle
     finally:
         if twin_id is not None:
             backend.teardown_twin(twin_id)

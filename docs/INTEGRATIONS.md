@@ -86,7 +86,7 @@ or the hierarchical form is fine.
 |---|---|
 | Applied | Junos: each `set` line is present, and each `delete` path is absent. Others: each line is present after whitespace normalization, and each `no X` means `X` is absent. This checks line presence, not position. |
 | Intents | The org baseline (`AEGIS_INTENTS_PATH`) plus any supplied intents, evaluated by Batfish against the running configs as full files (no merge) |
-| Status | `verified` · `drift` (a line is missing, still present, or a device has no running config) · `failed` (an intent fails or cannot be evaluated) · `unverifiable` (nothing checkable). It is never "verified" by default. |
+| Status | `verified` · `partial` (all lines landed, but some D3-referenced key values could not be verified, e.g. Junos `$9$`) · `drift` (a line is missing or still present, a key value differs, or a device has no running config) · `failed` (an intent fails or cannot be evaluated) · `unverifiable` (nothing checkable). It is never "verified" by default. |
 
 Only a bundle sealed by **this** AEGIS (pinned key) is accepted. The result is ledgered
 as `postchange_verified` with its `record_sha256`.
