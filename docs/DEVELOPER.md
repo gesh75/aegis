@@ -23,6 +23,7 @@ Companion pages: [ARCHITECTURE.md](ARCHITECTURE.md) (maps) · [GO_LIVE.md](GO_LI
 | `AEGIS_APPROVE_KEY` | `core/promote/tokens.py` | HMAC-SHA256 key for G2/G3 tokens. Hex (≥32 chars) or raw (≥16 bytes). Unset = asserted-unverified. Set-but-too-short = `SystemExit`. Set **requires** `AEGIS_API_KEY` (startup `SystemExit`; mint 503). |
 | `AEGIS_INTEGRATION_HOSTS` | `core/integrations/__init__.py` | Hosts declared in-perimeter for ServiceNow / NetBox while air-gap is on. Exact hostnames, comma-separated. |
 | `AEGIS_SNOW_*`, `AEGIS_NETBOX_*` | `core/integrations/` | See `docs/INTEGRATIONS.md`. |
+| `AEGIS_SECRET_STORE` / `AEGIS_SECRET_KEY` / `AEGIS_VAULT_TOKEN` | `core/secretref.py` | D3 secret references. Store = `file:/abs/path` or `vault:https://.../v1/<mount>/data/<path>`. Probed at startup (key check against existing entries, retention prune, canary write + read); a bad spec, a wrong or rotated key, or a dead vault = `SystemExit`. Required in production. `AEGIS_SECRET_RETENTION_DAYS` (default 30, 0 = keep) prunes the file store. |
 | `AEGIS_REVERSIBLE_SECRETS` | `evidence/secrets.py` | `fail` (default, D2) or `report`: whether type 7 / `$9$` fail PCI 8.3.2. Invalid = startup `SystemExit`. |
 | `AEGIS_PROMOTE_ALLOW_LIVE=1` | `core/promote/gate.py` G4 | Required in addition to a live connector. |
 | `AEGIS_HOST` / `AEGIS_PORT` | `serve.py` | Bind address (default `127.0.0.1:8088`). |

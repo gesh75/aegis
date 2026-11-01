@@ -177,7 +177,8 @@ def gate_and_ledger() -> None:
 def production_startup() -> None:
     saved = {k: os.environ.get(k) for k in ("AEGIS_MODE", "AEGIS_API_KEY", "AEGIS_APPROVE_KEY",
                                             "AEGIS_SEAL_KEY", "AEGIS_LEDGER_PATH",
-                                            "AEGIS_APPROVER_KEYS")}
+                                            "AEGIS_APPROVER_KEYS", "AEGIS_SECRET_STORE",
+                                            "AEGIS_SECRET_KEY")}
     try:
         for k in saved:
             os.environ.pop(k, None)
@@ -190,6 +191,13 @@ def production_startup() -> None:
         for k in ("AEGIS_API_KEY", "AEGIS_APPROVE_KEY", "AEGIS_SEAL_KEY", "AEGIS_LEDGER_PATH",
                   "AEGIS_APPROVER_KEYS"):
             os.environ[k] = "x"
+        try:  # D3: no production start while credential values would land in bundles
+            runtime.assert_startup_ok()
+            check("H6.refuses_without_secret_store", False, "started without a store")
+        except SystemExit as e:
+            check("H6.refuses_without_secret_store", "AEGIS_SECRET_STORE" in str(e), str(e))
+        os.environ["AEGIS_SECRET_STORE"] = "x"
+        os.environ["AEGIS_SECRET_KEY"] = "x"
         try:
             runtime.assert_startup_ok()
             check("H6.starts_configured", True)
