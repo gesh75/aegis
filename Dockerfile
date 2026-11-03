@@ -33,9 +33,11 @@ ENV AEGIS_HOST=0.0.0.0 \
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
   CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8088/healthz', timeout=2).status == 200 else 1)"]
 
-# One worker on purpose: the replay guard, ledger head and an ephemeral (community) seal
-# key are per-process. Scale with threads; scale out only with a pinned AEGIS_SEAL_KEY and
-# a shared AEGIS_LEDGER_PATH.
+# One worker by default because the community tier uses an EPHEMERAL per-process seal key.
+# The ledger (single-use approvals + hash chain) is multi-process safe: every write re-syncs
+# under flock. To scale out, pin AEGIS_SEAL_KEY and share AEGIS_LEDGER_PATH on a POSIX
+# filesystem with working flock (local disk; not every NFS mount honours it). /metrics
+# counters stay per-process.
 CMD ["gunicorn", "--chdir", "/app", "--workers", "1", "--threads", "8", \
      "--bind", "0.0.0.0:8088", "--access-logfile", "-", "--timeout", "120", \
      "aegis.serve:app"]
