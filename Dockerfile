@@ -1,7 +1,7 @@
 # AEGIS community core — PreFlight server. Self-contained, zero egress at runtime.
 # Pin the base by digest in your registry mirror for reproducible, air-gap-transferable
 # builds (docker buildx imagetools inspect python:3.11-slim-bookworm). Tag pinned here.
-FROM python:3.11-slim-bookworm
+FROM python:3.15-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
